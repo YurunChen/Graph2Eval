@@ -1,0 +1,60 @@
+apis:
+  # Anthropic API Configuration
+  # Set ANTHROPIC_API_KEY and ANTHROPIC_BASE_URL in .env file
+  anthropic:
+    api_key: null  # Loaded from ANTHROPIC_API_KEY environment variable
+    base_url: null  # Loaded from ANTHROPIC_BASE_URL environment variable
+    # Example: https://api.anthropic.com/v1/
+  
+  # Hugging Face API Configuration
+  # Set HUGGINGFACE_API_KEY in .env file
+  huggingface:
+    api_key: null  # Loaded from HUGGINGFACE_API_KEY environment variable
+    cache_dir: models/huggingface  # Can be overridden by HUGGINGFACE_CACHE_DIR
+    # Example cache_dir: /path/to/huggingface/cache
+  
+  # OpenAI API Configuration
+  # Set OPENAI_API_KEY, OPENAI_BASE_URL, OPENAI_ORGANIZATION in .env file
+  openai:
+    api_key: null  # Loaded from OPENAI_API_KEY environment variable
+    base_url: null  # Loaded from OPENAI_BASE_URL environment variable
+    organization: null  # Loaded from OPENAI_ORGANIZATION environment variable
+    # Example base_url: https://api.openai.com/v1/
+    # Example base_url: https://api.openai-proxy.org/v1/
+benchmark:
+  dataset_creation:
+    enabled: true
+  performance:
+    cache_embeddings: true
+  safety_tasks:
+    enabled: true
+    safety_check_enabled: true
+  stage_control:
+    run_until: evaluation
+  task_execution:
+    max_normal_tasks: 10
+    max_safety_tasks: 10
+    max_total_tasks: 20
+global:
+  random_seed: 42
+includes:
+- ingestion_config.yaml
+- graph_rag_config.yaml
+- task_craft_config.yaml
+- agent_config.yaml
+- evaluation_config.yaml
+- safety_config.yaml
+- datasets_config.yaml
+- finetuning_config.yaml
+orchestration:
+  execution:
+    max_retries: 3
+    retry_delay: 1
+    timeout: 300
+  monitoring:
+    log_dir: logs
+    log_level: DEBUG
+    save_logs: true
+  output:
+    base_dir: output # benchmark output directory
+    save_benchmark_results: true # save benchmark results to base_dir

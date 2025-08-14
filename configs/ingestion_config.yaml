@@ -1,0 +1,22 @@
+# Document Ingestion Configuration
+
+# Text Cleaning Configuration
+cleaning:
+  remove_headers_footers: true
+  remove_page_numbers: true
+  normalize_whitespace: true
+  remove_special_chars: false
+  fix_encoding: true
+  remove_urls: false
+  remove_emails: false
+  min_content_length: 20
+  remove_duplicate_lines: true
+
+# Chunk Configuration
+chunking:
+  enabled: true
+  chunk_size: 1000
+  overlap_size: 100
+  min_chunk_size: 50
+  max_chunk_size: 2000
+  strategy: "semantic"  # semantic, hierarchical, fixed_size

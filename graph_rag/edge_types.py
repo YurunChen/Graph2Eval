@@ -1,0 +1,448 @@
+"""
+Graph edge types for GraphRAG relationships
+"""
+
+from abc import ABC, abstractmethod
+from dataclasses import dataclass, field
+from typing import Dict, List, Any, Optional, Union
+from enum import Enum
+import json
+
+
+class EdgeType(Enum):
+    """Types of edges in the graph"""
+    SEQUENCE = "sequence"  # next/prev sequential relationship
+    CONTAINS = "contains"  # hierarchical containment
+    REFERS_TO = "refers_to"  # explicit reference
+    SEMANTIC_SIM = "semantic_sim"  # semantic similarity
+    ENTITY_RELATION = "entity_relation"  # entity relationships
+    CO_REFERENCE = "co_reference"  # coreference resolution
+    CROSS_DOC = "cross_doc"  # cross-document relationships
+    TABLE_CONTEXT = "table_context"  # table-paragraph relationships
+    FIGURE_CONTEXT = "figure_context"  # figure-text relationships
+
+
+@dataclass
+class Edge(ABC):
+    """Abstract base class for all graph edges"""
+    edge_id: str
+    edge_type: EdgeType
+    source_node_id: str
+    target_node_id: str
+    weight: float = 1.0
+    metadata: Dict[str, Any] = field(default_factory=dict)
+    bidirectional: bool = False
+    
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert edge to dictionary for serialization"""
+        return {
+            "edge_id": self.edge_id,
+            "edge_type": self.edge_type.value,
+            "source_node_id": self.source_node_id,
+            "target_node_id": self.target_node_id,
+            "weight": self.weight,
+            "metadata": self.metadata,
+            "bidirectional": self.bidirectional
+        }
+    
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> 'Edge':
+        """Create edge from dictionary - implemented in subclasses"""
+        raise NotImplementedError
+    
+    def reverse(self) -> 'Edge':
+        """Create reverse edge if bidirectional"""
+        if not self.bidirectional:
+            raise ValueError("Cannot reverse unidirectional edge")
+        
+        # Create new edge with swapped source/target
+        reversed_edge = self.__class__(
+            edge_id=f"{self.edge_id}_reverse",
+            edge_type=self.edge_type,
+            source_node_id=self.target_node_id,
+            target_node_id=self.source_node_id,
+            weight=self.weight,
+            metadata={**self.metadata, "is_reverse": True},
+            bidirectional=self.bidirectional
+        )
+        return reversed_edge
+
+
+@dataclass
+class SequenceEdge(Edge):
+    """Edge representing sequential relationship (next/previous)"""
+    sequence_type: str = "next"  # next, prev, follows
+    distance: int = 1  # how many steps apart
+    
+    def __post_init__(self):
+        if self.edge_type != EdgeType.SEQUENCE:
+            self.edge_type = EdgeType.SEQUENCE
+    
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> 'SequenceEdge':
+        return cls(
+            edge_id=data["edge_id"],
+            edge_type=EdgeType.SEQUENCE,
+            source_node_id=data["source_node_id"],
+            target_node_id=data["target_node_id"],
+            weight=data.get("weight", 1.0),
+            metadata=data.get("metadata", {}),
+            bidirectional=data.get("bidirectional", False),
+            sequence_type=data.get("sequence_type", "next"),
+            distance=data.get("distance", 1)
+        )
+
+
+@dataclass
+class ContainsEdge(Edge):
+    """Edge representing containment relationship"""
+    containment_type: str = "contains"  # contains, part_of, belongs_to
+    level_difference: int = 1  # hierarchical levels apart
+    
+    def __post_init__(self):
+        if self.edge_type != EdgeType.CONTAINS:
+            self.edge_type = EdgeType.CONTAINS
+    
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> 'ContainsEdge':
+        return cls(
+            edge_id=data["edge_id"],
+            edge_type=EdgeType.CONTAINS,
+            source_node_id=data["source_node_id"],
+            target_node_id=data["target_node_id"],
+            weight=data.get("weight", 1.0),
+            metadata=data.get("metadata", {}),
+            bidirectional=data.get("bidirectional", False),
+            containment_type=data.get("containment_type", "contains"),
+            level_difference=data.get("level_difference", 1)
+        )
+
+
+@dataclass
+class ReferenceEdge(Edge):
+    """Edge representing explicit references"""
+    reference_type: str = "mentions"  # mentions, cites, refers_to, points_to
+    reference_text: str = ""  # the actual reference text
+    confidence: float = 1.0
+    
+    def __post_init__(self):
+        if self.edge_type != EdgeType.REFERS_TO:
+            self.edge_type = EdgeType.REFERS_TO
+    
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> 'ReferenceEdge':
+        return cls(
+            edge_id=data["edge_id"],
+            edge_type=EdgeType.REFERS_TO,
+            source_node_id=data["source_node_id"],
+            target_node_id=data["target_node_id"],
+            weight=data.get("weight", 1.0),
+            metadata=data.get("metadata", {}),
+            bidirectional=data.get("bidirectional", False),
+            reference_type=data.get("reference_type", "mentions"),
+            reference_text=data.get("reference_text", ""),
+            confidence=data.get("confidence", 1.0)
+        )
+
+
+@dataclass
+class SemanticEdge(Edge):
+    """Edge representing semantic similarity"""
+    similarity_score: float = 0.0
+    similarity_method: str = "cosine"  # cosine, jaccard, bert_score, etc.
+    threshold_used: float = 0.7
+    
+    def __post_init__(self):
+        if self.edge_type != EdgeType.SEMANTIC_SIM:
+            self.edge_type = EdgeType.SEMANTIC_SIM
+        # Weight should be similarity score
+        if self.similarity_score > 0:
+            self.weight = self.similarity_score
+    
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> 'SemanticEdge':
+        return cls(
+            edge_id=data["edge_id"],
+            edge_type=EdgeType.SEMANTIC_SIM,
+            source_node_id=data["source_node_id"],
+            target_node_id=data["target_node_id"],
+            weight=data.get("weight", 1.0),
+            metadata=data.get("metadata", {}),
+            bidirectional=data.get("bidirectional", True),  # Similarity is typically bidirectional
+            similarity_score=data.get("similarity_score", 0.0),
+            similarity_method=data.get("similarity_method", "cosine"),
+            threshold_used=data.get("threshold_used", 0.7)
+        )
+
+
+@dataclass
+class EntityRelationEdge(Edge):
+    """Edge representing relationships between entities"""
+    relation_type: str = "RELATED_TO"  # WORKS_FOR, LOCATED_IN, PART_OF, etc.
+    relation_confidence: float = 1.0
+    relation_context: str = ""  # context where relation was found
+    
+    def __post_init__(self):
+        if self.edge_type != EdgeType.ENTITY_RELATION:
+            self.edge_type = EdgeType.ENTITY_RELATION
+    
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> 'EntityRelationEdge':
+        return cls(
+            edge_id=data["edge_id"],
+            edge_type=EdgeType.ENTITY_RELATION,
+            source_node_id=data["source_node_id"],
+            target_node_id=data["target_node_id"],
+            weight=data.get("weight", 1.0),
+            metadata=data.get("metadata", {}),
+            bidirectional=data.get("bidirectional", False),
+            relation_type=data.get("relation_type", "RELATED_TO"),
+            relation_confidence=data.get("relation_confidence", 1.0),
+            relation_context=data.get("relation_context", "")
+        )
+
+
+@dataclass
+class CoReferenceEdge(Edge):
+    """Edge representing coreference relationships"""
+    coreference_type: str = "pronoun"  # pronoun, nominal, proper_noun
+    mention_text: str = ""
+    resolution_confidence: float = 1.0
+    
+    def __post_init__(self):
+        if self.edge_type != EdgeType.CO_REFERENCE:
+            self.edge_type = EdgeType.CO_REFERENCE
+        self.bidirectional = True  # Coreference is bidirectional
+    
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> 'CoReferenceEdge':
+        return cls(
+            edge_id=data["edge_id"],
+            edge_type=EdgeType.CO_REFERENCE,
+            source_node_id=data["source_node_id"],
+            target_node_id=data["target_node_id"],
+            weight=data.get("weight", 1.0),
+            metadata=data.get("metadata", {}),
+            bidirectional=data.get("bidirectional", True),
+            coreference_type=data.get("coreference_type", "pronoun"),
+            mention_text=data.get("mention_text", ""),
+            resolution_confidence=data.get("resolution_confidence", 1.0)
+        )
+
+
+@dataclass
+class CrossDocEdge(Edge):
+    """Edge representing cross-document relationships"""
+    doc1_id: str = ""
+    doc2_id: str = ""
+    match_type: str = "entity_match"  # entity_match, topic_match, citation
+    match_confidence: float = 1.0
+    
+    def __post_init__(self):
+        if self.edge_type != EdgeType.CROSS_DOC:
+            self.edge_type = EdgeType.CROSS_DOC
+    
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> 'CrossDocEdge':
+        return cls(
+            edge_id=data["edge_id"],
+            edge_type=EdgeType.CROSS_DOC,
+            source_node_id=data["source_node_id"],
+            target_node_id=data["target_node_id"],
+            weight=data.get("weight", 1.0),
+            metadata=data.get("metadata", {}),
+            bidirectional=data.get("bidirectional", False),
+            doc1_id=data.get("doc1_id", ""),
+            doc2_id=data.get("doc2_id", ""),
+            match_type=data.get("match_type", "entity_match"),
+            match_confidence=data.get("match_confidence", 1.0)
+        )
+
+
+@dataclass
+class TableContextEdge(Edge):
+    """Edge connecting tables with their context"""
+    context_type: str = "explains"  # explains, introduces, summarizes, references
+    context_position: str = "before"  # before, after, above, below
+    distance_sentences: int = 0
+    
+    def __post_init__(self):
+        if self.edge_type != EdgeType.TABLE_CONTEXT:
+            self.edge_type = EdgeType.TABLE_CONTEXT
+    
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> 'TableContextEdge':
+        return cls(
+            edge_id=data["edge_id"],
+            edge_type=EdgeType.TABLE_CONTEXT,
+            source_node_id=data["source_node_id"],
+            target_node_id=data["target_node_id"],
+            weight=data.get("weight", 1.0),
+            metadata=data.get("metadata", {}),
+            bidirectional=data.get("bidirectional", False),
+            context_type=data.get("context_type", "explains"),
+            context_position=data.get("context_position", "before"),
+            distance_sentences=data.get("distance_sentences", 0)
+        )
+
+
+@dataclass
+class FigureContextEdge(Edge):
+    """Edge connecting figures with their context"""
+    context_type: str = "caption"  # caption, reference, description
+    context_position: str = "below"  # above, below, left, right
+    
+    def __post_init__(self):
+        if self.edge_type != EdgeType.FIGURE_CONTEXT:
+            self.edge_type = EdgeType.FIGURE_CONTEXT
+    
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> 'FigureContextEdge':
+        return cls(
+            edge_id=data["edge_id"],
+            edge_type=EdgeType.FIGURE_CONTEXT,
+            source_node_id=data["source_node_id"],
+            target_node_id=data["target_node_id"],
+            weight=data.get("weight", 1.0),
+            metadata=data.get("metadata", {}),
+            bidirectional=data.get("bidirectional", False),
+            context_type=data.get("context_type", "caption"),
+            context_position=data.get("context_position", "below")
+        )
+
+
+# Factory function for creating edges
+def create_edge(edge_type: EdgeType, **kwargs) -> Edge:
+    """Factory function to create appropriate edge type"""
+    edge_classes = {
+        EdgeType.SEQUENCE: SequenceEdge,
+        EdgeType.CONTAINS: ContainsEdge,
+        EdgeType.REFERS_TO: ReferenceEdge,
+        EdgeType.SEMANTIC_SIM: SemanticEdge,
+        EdgeType.ENTITY_RELATION: EntityRelationEdge,
+        EdgeType.CO_REFERENCE: CoReferenceEdge,
+        EdgeType.CROSS_DOC: CrossDocEdge,
+        EdgeType.TABLE_CONTEXT: TableContextEdge,
+        EdgeType.FIGURE_CONTEXT: FigureContextEdge
+    }
+    
+    edge_class = edge_classes.get(edge_type)
+    if not edge_class:
+        raise ValueError(f"Unknown edge type: {edge_type}")
+    
+    return edge_class(edge_type=edge_type, **kwargs)
+
+
+def edge_from_dict(data: Dict[str, Any]) -> Edge:
+    """Create edge from dictionary representation"""
+    edge_type = EdgeType(data["edge_type"])
+    
+    edge_classes = {
+        EdgeType.SEQUENCE: SequenceEdge,
+        EdgeType.CONTAINS: ContainsEdge,
+        EdgeType.REFERS_TO: ReferenceEdge,
+        EdgeType.SEMANTIC_SIM: SemanticEdge,
+        EdgeType.ENTITY_RELATION: EntityRelationEdge,
+        EdgeType.CO_REFERENCE: CoReferenceEdge,
+        EdgeType.CROSS_DOC: CrossDocEdge,
+        EdgeType.TABLE_CONTEXT: TableContextEdge,
+        EdgeType.FIGURE_CONTEXT: FigureContextEdge
+    }
+    
+    edge_class = edge_classes.get(edge_type)
+    if not edge_class:
+        raise ValueError(f"Unknown edge type: {edge_type}")
+    
+    return edge_class.from_dict(data)
+
+
+# Graph motif patterns for task generation
+@dataclass
+class GraphMotif:
+    """Represents a graph pattern/motif for task generation"""
+    motif_id: str
+    name: str
+    description: str
+    node_pattern: List[str]  # Required node types
+    edge_pattern: List[str]  # Required edge types
+    min_nodes: int = 2
+    max_nodes: int = 10
+    complexity_score: float = 1.0
+    
+    def matches_subgraph(self, nodes: List[str], edges: List[str]) -> bool:
+        """Check if a subgraph matches this motif pattern"""
+        # Simple pattern matching - can be enhanced
+        node_types_present = set(nodes)
+        edge_types_present = set(edges)
+        
+        required_nodes = set(self.node_pattern)
+        required_edges = set(self.edge_pattern)
+        
+        return (required_nodes.issubset(node_types_present) and 
+                required_edges.issubset(edge_types_present) and
+                self.min_nodes <= len(nodes) <= self.max_nodes)
+
+
+# Common motif patterns
+COMMON_MOTIFS = [
+    GraphMotif(
+        motif_id="sequential_path",
+        name="Sequential Path",
+        description="A sequence of connected nodes",
+        node_pattern=["paragraph", "paragraph"],
+        edge_pattern=["sequence"],
+        min_nodes=2,
+        max_nodes=5,
+        complexity_score=1.0
+    ),
+    GraphMotif(
+        motif_id="table_with_context",
+        name="Table with Context",
+        description="Table connected to explanatory text",
+        node_pattern=["table", "paragraph"],
+        edge_pattern=["table_context"],
+        min_nodes=2,
+        max_nodes=4,
+        complexity_score=2.0
+    ),
+    GraphMotif(
+        motif_id="entity_cluster",
+        name="Entity Cluster",
+        description="Multiple entities with relationships",
+        node_pattern=["entity", "entity"],
+        edge_pattern=["entity_relation"],
+        min_nodes=2,
+        max_nodes=6,
+        complexity_score=2.5
+    ),
+    GraphMotif(
+        motif_id="hierarchical_section",
+        name="Hierarchical Section",
+        description="Heading with subordinate content",
+        node_pattern=["heading", "paragraph"],
+        edge_pattern=["contains"],
+        min_nodes=2,
+        max_nodes=8,
+        complexity_score=1.5
+    ),
+    GraphMotif(
+        motif_id="semantic_cluster",
+        name="Semantic Cluster",
+        description="Semantically similar content",
+        node_pattern=["paragraph", "paragraph"],
+        edge_pattern=["semantic_sim"],
+        min_nodes=3,
+        max_nodes=7,
+        complexity_score=2.0
+    ),
+    GraphMotif(
+        motif_id="cross_reference",
+        name="Cross Reference",
+        description="Nodes with explicit references",
+        node_pattern=["paragraph", "paragraph"],
+        edge_pattern=["refers_to"],
+        min_nodes=2,
+        max_nodes=5,
+        complexity_score=1.8
+    )
+]

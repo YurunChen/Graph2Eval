@@ -1,0 +1,46 @@
+# Finetuning configuration - Simplified version
+
+# Finetuning settings
+finetuning:
+  enabled: false  # 默认关闭
+  strategy: "lora"  # full, lora, adapter
+  base_model: "gpt-4o-mini"
+  model_type: "causal_lm"
+
+# Training parameters
+training:
+  learning_rate: 5e-5
+  batch_size: 8
+  num_epochs: 3
+  warmup_steps: 100
+  weight_decay: 0.01
+  max_grad_norm: 1.0
+
+# LoRA configuration
+lora:
+  r: 16
+  alpha: 32
+  dropout: 0.1
+  target_modules: null  # 自动检测
+
+# Evaluation configuration
+evaluation:
+  eval_strategy: "steps"
+  eval_steps: 500
+  save_strategy: "best"
+  metric_for_best_model: "eval_loss"
+  early_stopping_patience: 3
+
+# Data configuration
+data:
+  min_samples_for_training: 100
+  max_samples_per_iteration: 5000
+  holdout_ratio: 0.2
+  balance_failure_types: true
+
+# Offline optimization
+offline_optimization:
+  strategy: "iterative"  # single_shot, iterative, adaptive
+  max_iterations: 3
+  improvement_threshold: 0.05
+  patience: 2

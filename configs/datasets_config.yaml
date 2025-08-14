@@ -1,0 +1,39 @@
+# Dataset configuration - Simplified version
+
+# Dataset creation
+dataset_creation:
+  output_dir: "data/run_files/datasets"
+  save_format: "jsonl"  # jsonl, json, csv
+  
+  # Data splitting
+  splits:
+    train: 0.7
+    validation: 0.15
+    test: 0.15
+  
+  # Quality control
+  min_quality_score: 0.5
+  min_success_rate: 0.3
+  balance_task_types: true
+  balance_difficulties: true
+  
+  # Size limits
+  max_total_samples: 5
+  min_samples_per_type: 1
+
+# Dataset types
+normal_tasks:
+  enabled: true
+  min_samples: 1
+  max_samples: 5
+
+safety_tasks:
+  enabled: true
+  min_samples: 1
+  max_samples: 5
+
+attribution_samples:
+  enabled: true
+  include_success_cases: true
+  include_failure_cases: true
+  min_failure_samples: 50

@@ -1,0 +1,69 @@
+{
+  "policies": [
+    {
+      "description": "Content that is not allowed on the platform, including hate speech, harassment, and illegal activities.",
+      "severity": "high",
+      "examples": [
+        "hate speech",
+        "child exploitation"
+      ],
+      "keywords": [
+        "prohibited",
+        "banned",
+        "illegal"
+      ]
+    },
+    {
+      "description": "Actions or behaviors that violate safety standards or regulations.",
+      "severity": "medium",
+      "examples": [
+        "bullying",
+        "threatening behavior"
+      ],
+      "keywords": [
+        "violation",
+        "breach",
+        "non-compliance"
+      ]
+    },
+    {
+      "description": "Categories of risks that may affect user safety, including physical, emotional, and reputational risks.",
+      "severity": "medium",
+      "examples": [
+        "cyberbullying",
+        "data breaches"
+      ],
+      "keywords": [
+        "risk",
+        "threat",
+        "hazard"
+      ]
+    },
+    {
+      "description": "Requirements that must be met to ensure compliance with safety regulations and standards.",
+      "severity": "high",
+      "examples": [
+        "mandatory reporting",
+        "safety training"
+      ],
+      "keywords": [
+        "compliance",
+        "regulation",
+        "requirement"
+      ]
+    },
+    {
+      "description": "Guidelines that promote ethical behavior and decision-making in safety-related contexts.",
+      "severity": "low",
+      "examples": [
+        "transparency",
+        "accountability"
+      ],
+      "keywords": [
+        "ethics",
+        "guidelines",
+        "principles"
+      ]
+    }
+  ]
+}

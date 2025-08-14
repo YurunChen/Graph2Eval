@@ -1,0 +1,45 @@
+# Graph Configuration
+
+# Graph Construction Configuration
+graph_builder:
+  # Node Creation
+  create_chunk_nodes: true
+  create_element_nodes: true
+  create_entity_nodes: true
+  
+  # Edge creation
+  create_sequence_edges: true
+  create_containment_edges: true
+  create_reference_edges: true
+  create_semantic_edges: true
+  create_entity_edges: true
+  create_context_edges: true
+  
+  # Threshold settings
+  semantic_similarity_threshold: 0.7
+  reference_detection_threshold: 0.8
+  entity_confidence_threshold: 0.7
+  
+  # Chunking settings
+  use_chunking: true
+  chunk_size: 500
+  chunk_overlap: 50
+
+# Embedding configuration
+embeddings:
+  model_name: "all-MiniLM-L6-v2"
+  batch_size: 32
+  max_seq_length: 512
+  normalize_embeddings: true
+  cache_embeddings: true
+  device: "auto"
+
+# Storage configuration
+storage:
+  backend: "json"  # json, sqlite, neo4j
+  file_path: "data/run_files/graph/knowledge_graph.json"
+  
+# Vector index configuration
+vector_index:
+  index_type: "flat"  # flat, faiss
+  save_path: "data/run_files/vectors"

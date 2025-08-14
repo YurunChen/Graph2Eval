@@ -1,0 +1,38 @@
+# TaskCraft configuration - Simplified version
+
+# Task generation configuration
+generation:
+  max_tasks_per_template: 10
+  max_total_tasks: 20
+  min_content_length: 50
+  require_gold_answer: true
+  require_citations: true   # RAG agent needs citations
+  require_reasoning: true   # RAG agent needs reasoning
+  avoid_duplicates: true
+  random_seed: 42
+  shuffle_tasks: true
+  
+  # Quality control thresholds (simplified - only for deduplication)
+  content_overlap_threshold: 0.8 # Content overlap threshold for deduplication
+  
+  # LLM-based task generation
+  use_llm_generation: true  # Enable LLM-based task generation
+  llm_model_name: gpt-4o-mini
+  llm_temperature: 0.7
+  llm_max_tokens: 9000
+  
+  # LLM-based quality assessment
+  use_llm_quality_check: true  # Enable LLM-based quality assessment
+  quality_check_model: gpt-4o-mini
+  quality_check_temperature: 0.3
+  quality_check_max_tokens: 2000
+  llm_quality_threshold: 0.6  # Minimum quality score threshold (increased for better quality)
+
+# Subgraph sampling configuration
+subgraph_sampling:
+  sampling_strategy: "random"  # random, motif_based, centrality_based, semantic_based, hybrid
+  max_samples_per_template: 5 
+  min_subgraph_size: 1
+  max_subgraph_size: 6 
+  avoid_disconnected: true
+  ensure_diversity: true
