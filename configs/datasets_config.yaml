@@ -21,19 +21,6 @@ dataset_creation:
   max_total_samples: 5
   min_samples_per_type: 1
 
-# Dataset types
-normal_tasks:
-  enabled: true
-  min_samples: 1
-  max_samples: 5
 
-safety_tasks:
-  enabled: true
-  min_samples: 1
-  max_samples: 5
 
-attribution_samples:
-  enabled: true
-  include_success_cases: true
-  include_failure_cases: true
-  min_failure_samples: 50
+

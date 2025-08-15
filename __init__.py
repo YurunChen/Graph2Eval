@@ -10,6 +10,6 @@ __author__ = "Yu Runchen"
 
 from .agent_framework import Agent
 from .graph_rag import GraphRAG
-from .task_craft import TaskGenerator
+from .task_craft import TaskGenerator, SafetyTaskGenerator
 
-__all__ = ["Agent", "GraphRAG", "TaskGenerator"]
+__all__ = ["Agent", "GraphRAG", "TaskGenerator", "SafetyTaskGenerator"]

@@ -9,7 +9,6 @@ from dataclasses import dataclass
 from loguru import logger
 
 from .executors import LLMExecutor, ExecutionConfig, ExecutionResult
-from .safety import PolicyBasedSafetyChecker
 from .evaluators import MultiDimensionalEvaluator
 from task_craft.task_generator import TaskInstance
 
@@ -138,18 +137,6 @@ class NoRAGAgent:
                 error_message=str(e)
             )
     
-    # def _check_safety(self, execution_result: ExecutionResult) -> tuple[bool, List[str]]: # Removed safety check
-    #     """检查安全性"""
-    #     if not self.config.enable_safety or self.safety_checker is None:
-    #         return True, []
-        
-    #     try:
-    #         safety_result = self.safety_checker.check_content(execution_result.answer)
-    #         safety_issues = [v.value for v in safety_result.violations]
-    #         return len(safety_issues) == 0, safety_issues
-    #     except Exception as e:
-    #         logger.error(f"Error during safety check: {e}")
-    #         return False, [f"Safety check failed: {e}"]
     
     def get_stats(self) -> Dict[str, Any]:
         """获取agent统计信息"""

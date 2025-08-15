@@ -20,3 +20,27 @@ chunking:
   min_chunk_size: 50
   max_chunk_size: 2000
   strategy: "semantic"  # semantic, hierarchical, fixed_size
+
+# Parsing Configuration
+parsing:
+  pdf_extract_tables: true
+  pdf_extract_images: true
+  html_extract_links: true
+  html_extract_images: true
+
+# Image Processing Configuration
+image_processing:
+  save_images: true
+  image_output_dir: "data/images"
+  image_format: "png"  # png, jpg, jpeg
+  max_image_size: 2048  # max width/height in pixels
+  compress_images: true
+  image_quality: 85  # for jpg compression (1-100)
+
+# Image Storage Configuration
+image_storage:
+  enabled: true
+  save_directory: "data/images"
+  format: "png"  # png, jpg, jpeg
+  max_size: 10485760  # 10MB max file size
+  compress: true

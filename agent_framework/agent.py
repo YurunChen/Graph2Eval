@@ -10,7 +10,6 @@ from loguru import logger
 
 from .retrievers import Retriever, RetrievalResult, RetrievalConfig, HybridRetriever, ContextualRetriever
 from .executors import TaskExecutor, ExecutionResult, ExecutionConfig, LLMExecutor, MultiStepExecutor
-from .safety import PolicySuite
 from .evaluators import TaskEvaluator
 from task_craft.task_generator import TaskInstance
 from graph_rag.graph_builder import DocumentGraph
@@ -206,7 +205,7 @@ class RAGAgent:
                 logger.info(f"📚 Retrieved {len(retrieval_result.nodes)} nodes using {retrieval_result.retrieval_method}")
             
             # Step 2: Execute task
-            execution_result = self.executor.execute_task(task)
+            execution_result = self.executor.execute(task, retrieval_result)
             
             # Step 3: Evaluation (if enabled)
             evaluation_result = self._evaluate_response(task, execution_result, retrieval_result)
@@ -295,7 +294,8 @@ class RAGAgent:
             tokens_used=execution_result.tokens_used,
             evaluation_score=evaluation_result["score"],
             evaluation_details=evaluation_result["details"],
-            retrieval_nodes=retrieval_result.nodes if retrieval_result else [],
+            retrieved_nodes=[node.node_id for node in retrieval_result.nodes] if retrieval_result else [],
+            retrieval_method=retrieval_result.retrieval_method if retrieval_result else "",
             retrieval_scores=retrieval_result.scores if retrieval_result else {},
             error_type=execution_result.error_type,
             error_message=execution_result.error_message

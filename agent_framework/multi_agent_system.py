@@ -1520,14 +1520,11 @@ class MultiAgentSystemConfig:
     summarizer_model: str = "gpt-4o-mini"
     
     # System configuration
-    enable_parallel_execution: bool = False
-    enable_agent_communication: bool = True
     max_iterations: int = 3
     confidence_threshold: float = 0.7
     
     # Logging configuration
     verbose: bool = False
-    log_agent_outputs: bool = True
 
 
 class MultiAgentSystem:
@@ -1554,11 +1551,15 @@ class MultiAgentSystem:
             # Initialize agents with shared executor
             self.agents = {
                 AgentRole.PLANNER: PlannerAgent(config.planner_config, executor),
-                AgentRole.RETRIEVER: RetrieverAgent(config.retriever_config, executor),
                 AgentRole.REASONER: ReasonerAgent(config.reasoner_config, executor),
                 AgentRole.VERIFIER: VerifierAgent(config.verifier_config, executor),
                 AgentRole.SUMMARIZER: SummarizerAgent(config.summarizer_config, executor)
             }
+            
+            # Conditionally add retriever agent based on configuration
+            # Check if retriever should be enabled by looking at the config
+            if hasattr(config, 'retriever_config') and config.retriever_config:
+                self.agents[AgentRole.RETRIEVER] = RetrieverAgent(config.retriever_config, executor)
             
             self.logger.info(f"Multi-agent system initialized with shared executor: {executor.config.model_name}")
         else:
@@ -1572,24 +1573,36 @@ class MultiAgentSystem:
             # Store actual model names used for logging
             self.actual_models = {
                 'planner': planner_executor.config.model_name,
-                'retriever': retriever_executor.config.model_name,
                 'reasoner': reasoner_executor.config.model_name,
                 'verifier': verifier_executor.config.model_name,
                 'summarizer': summarizer_executor.config.model_name
             }
             
+            # Conditionally add retriever model if retriever agent is enabled
+            if hasattr(config, 'retriever_config') and config.retriever_config:
+                self.actual_models['retriever'] = retriever_executor.config.model_name
+            else:
+                # Remove retriever from actual_models if it was added earlier
+                self.actual_models.pop('retriever', None)
+            
             # Initialize agents with their specific executors
             self.agents = {
                 AgentRole.PLANNER: PlannerAgent(config.planner_config, planner_executor),
-                AgentRole.RETRIEVER: RetrieverAgent(config.retriever_config, retriever_executor),
                 AgentRole.REASONER: ReasonerAgent(config.reasoner_config, reasoner_executor),
                 AgentRole.VERIFIER: VerifierAgent(config.verifier_config, verifier_executor),
                 AgentRole.SUMMARIZER: SummarizerAgent(config.summarizer_config, summarizer_executor)
             }
             
+            # Conditionally add retriever agent based on configuration
+            if hasattr(config, 'retriever_config') and config.retriever_config:
+                self.agents[AgentRole.RETRIEVER] = RetrieverAgent(config.retriever_config, retriever_executor)
+            
             self.logger.info(f"Multi-agent system initialized with individual LLM models:")
             self.logger.info(f"  Planner: {self.actual_models['planner']}")
-            self.logger.info(f"  Retriever: {self.actual_models['retriever']}")
+            if 'retriever' in self.actual_models:
+                self.logger.info(f"  Retriever: {self.actual_models['retriever']}")
+            else:
+                self.logger.info(f"  Retriever: Disabled (no_rag mode)")
             self.logger.info(f"  Reasoner: {self.actual_models['reasoner']}")
             self.logger.info(f"  Verifier: {self.actual_models['verifier']}")
             self.logger.info(f"  Summarizer: {self.actual_models['summarizer']}")
@@ -1652,7 +1665,7 @@ class MultiAgentSystem:
                 summarizer_output=response.get('summarizer_output', {}),
                 execution_time=execution_time,
                 total_tokens=total_tokens,
-                model_used=f"Multi-Agent({self.actual_models['planner']},{self.actual_models['retriever']},{self.actual_models['reasoner']},{self.actual_models['verifier']},{self.actual_models['summarizer']})"
+                model_used=f"Multi-Agent({self.actual_models['planner']},{self.actual_models.get('retriever', 'disabled')},{self.actual_models['reasoner']},{self.actual_models['verifier']},{self.actual_models['summarizer']})"
             )
             
             self.logger.info(f"Task execution completed: {task.task_id}, time taken: {execution_time:.2f}s")
@@ -1721,7 +1734,20 @@ class MultiAgentSystem:
         """Execute retrieval agent"""
         task = context['task']
         graph = context.get('graph')
-        return self.agents[AgentRole.RETRIEVER].execute(task, {'graph': graph, 'planner_output': context.get('planner_output', {})})
+        
+        # Check if retriever agent exists
+        if AgentRole.RETRIEVER in self.agents:
+            return self.agents[AgentRole.RETRIEVER].execute(task, {'graph': graph, 'planner_output': context.get('planner_output', {})})
+        else:
+            # Return empty subgraph info if retriever agent is disabled
+            from .retrievers import RetrievalResult
+            return SubgraphInfo(
+                nodes=[],
+                edges=[],
+                relevance_score=0.0,
+                coverage_score=0.0,
+                reasoning="Retriever agent is disabled (no_rag mode)"
+            )
     
     def _execute_reasoner(self, context: Dict[str, Any]) -> List[ReasoningStep]:
         """Execute reasoning agent"""
@@ -1749,11 +1775,16 @@ class MultiAgentSystem:
     
     def get_agent_status(self) -> Dict[str, Any]:
         """Get agent status"""
+        agent_status = {}
+        for role in AgentRole:
+            if role in self.agents:
+                agent_status[role.value] = "active"
+            else:
+                agent_status[role.value] = "disabled"
+        
         return {
-            "agents": {role.value: "active" for role in AgentRole},
+            "agents": agent_status,
             "config": {
-                "enable_parallel_execution": self.config.enable_parallel_execution,
-                "enable_agent_communication": self.config.enable_agent_communication,
                 "max_iterations": self.config.max_iterations,
                 "confidence_threshold": self.config.confidence_threshold
             }
@@ -1771,84 +1802,112 @@ class MultiAgentSystem:
 
 # Convenient factory function
 def create_multi_agent_system(
-    planner_model: str = "gpt-4o-mini",
-    retriever_model: str = "gpt-4o-mini",
-    reasoner_model: str = "gpt-4o-mini",
-    verifier_model: str = "gpt-4o-mini",
-    summarizer_model: str = "gpt-4o-mini",
-    enable_evaluation: bool = True,
-    verbose: bool = False,
+    multi_agent_config: Dict[str, Any] = None,
+    system_config: Dict[str, Any] = None,
+    agent_type: str = "rag",
     executor: Optional[LLMExecutor] = None
 ) -> MultiAgentSystem:
-    """Create multi-agent system with individual LLM models for each agent
+    """Create multi-agent system from unified configuration
     
     Args:
-        planner_model: Model name for planner agent (or "gpt-4o-mini" to use agent config)
-        retriever_model: Model name for retriever agent (or "gpt-4o-mini" to use agent config)
-        reasoner_model: Model name for reasoner agent (or "gpt-4o-mini" to use agent config)
-        verifier_model: Model name for verifier agent (or "gpt-4o-mini" to use agent config)
-        summarizer_model: Model name for summarizer agent (or "gpt-4o-mini" to use agent config)
-        enable_evaluation: Enable evaluation mode
-        verbose: Enable verbose logging
+        multi_agent_config: Multi-agent system configuration dictionary
+        system_config: Common system configuration dictionary
+        agent_type: "rag" or "no_rag" - controls whether retrieval is enabled
         executor: Optional shared executor (if provided, all agents will use this executor; if None, each agent gets its own executor)
     
     Example:
-        # Use different models for different agents
+        # Use unified configuration
         system = create_multi_agent_system(
-            planner_model="gpt-4",
-            retriever_model="gpt-3.5-turbo",
-            reasoner_model="gpt-4",
-            verifier_model="gpt-3.5-turbo",
-            summarizer_model="gpt-4"
+            multi_agent_config=agent_config['multi_agent'],
+            system_config=agent_config['system'],
+            agent_type=agent_config['agent_type']
         )
-        
-        # Use agent config models (default)
-        system = create_multi_agent_system()  # All agents use their config models
-        
-        # Use shared executor
-        shared_executor = LLMExecutor(ExecutionConfig(model_name="gpt-4"))
-        system = create_multi_agent_system(executor=shared_executor)  # All agents use shared executor
     """
     
-    # Create base configuration
-    base_config = AgentConfig(
-        execution_config=ExecutionConfig(
-            model_name="gpt-4o-mini",  # This will be overridden by individual models or agent configs
-            temperature=0.1,
-            max_tokens=1000,
-            timeout=30,
-            max_retries=3
-        ),
-        retrieval_config=RetrievalConfig(
-            max_nodes=10,
-            max_hops=3,
-            similarity_threshold=0.7
-        ),
-        enable_evaluation=enable_evaluation,
+    # Use default configs if not provided
+    multi_agent_config = multi_agent_config or {}
+    system_config = system_config or {}
+    
+    # Get system-level settings
+    max_iterations = multi_agent_config.get('max_iterations', 3)
+    confidence_threshold = multi_agent_config.get('confidence_threshold', 0.7)
+    verbose = multi_agent_config.get('verbose', system_config.get('verbose', False))
+    
+    # Get agent configurations
+    agents_config = multi_agent_config.get('agents', {})
+    
+    # Create agent configs from unified configuration
+    agent_configs = {}
+    for role in ['planner', 'retriever', 'reasoner', 'verifier', 'summarizer']:
+        role_config = agents_config.get(role, {})
+        
+        # Skip retriever agent if agent_type is "no_rag"
+        if role == 'retriever' and agent_type == 'no_rag':
+            logger.info("🔄 Skipping retriever agent (agent_type is 'no_rag')")
+            continue
+        
+        # Create execution config for this agent
+        execution_config = ExecutionConfig(
+            model_name=role_config.get('model_name', 'gpt-4o-mini'),
+            temperature=role_config.get('temperature', 0.1),
+            max_tokens=role_config.get('max_tokens', 1000),
+            timeout=role_config.get('timeout', 30),
+            max_retries=role_config.get('max_retries', 3),
+            response_format=role_config.get('response_format', 'json')
+        )
+        
+        # Create retrieval config for this agent
+        # Disable retrieval for all agents if agent_type is "no_rag"
+        retrieval_enabled = (agent_type == 'rag')
+        retrieval_config = RetrievalConfig(
+            max_nodes=role_config.get('retrieval', {}).get('max_nodes', 10),
+            max_hops=role_config.get('retrieval', {}).get('max_hops', 3),
+            similarity_threshold=role_config.get('retrieval', {}).get('similarity_threshold', 0.7)
+        )
+        
+        # Create agent config
+        agent_configs[role] = AgentConfig(
+            execution_config=execution_config,
+            retrieval_config=retrieval_config,
+            enable_evaluation=role_config.get('enable_evaluation', system_config.get('enable_evaluation', True)),
+            verbose=role_config.get('verbose', system_config.get('verbose', False))
+        )
+    
+    # Create multi-agent system configuration
+    # Use default config for retriever if it was skipped
+    if 'retriever' not in agent_configs:
+        # Create a default retriever config for no_rag mode
+        default_retriever_config = AgentConfig(
+            execution_config=ExecutionConfig(
+                model_name='gpt-4o-mini',
+                temperature=0.1,
+                max_tokens=1000,
+                timeout=30,
+                max_retries=3,
+                response_format='json'
+            ),
+            retrieval_config=RetrievalConfig(
+                max_nodes=10,
+                max_hops=3,
+                similarity_threshold=0.7
+            ),
+            enable_evaluation=system_config.get('enable_evaluation', True),
+            verbose=system_config.get('verbose', False)
+        )
+        agent_configs['retriever'] = default_retriever_config
+    
+    mas_config = MultiAgentSystemConfig(
+        planner_config=agent_configs['planner'],
+        retriever_config=agent_configs['retriever'],
+        reasoner_config=agent_configs['reasoner'],
+        verifier_config=agent_configs['verifier'],
+        summarizer_config=agent_configs['summarizer'],
+        max_iterations=max_iterations,
+        confidence_threshold=confidence_threshold,
         verbose=verbose
     )
     
-    # Create multi-agent system configuration with individual models
-    system_config = MultiAgentSystemConfig(
-        planner_config=base_config,
-        retriever_config=base_config,
-        reasoner_config=base_config,
-        verifier_config=base_config,
-        summarizer_config=base_config,
-        # Individual LLM models for each agent
-        planner_model=planner_model,
-        retriever_model=retriever_model,
-        reasoner_model=reasoner_model,
-        verifier_model=verifier_model,
-        summarizer_model=summarizer_model,
-        enable_parallel_execution=False,
-        enable_agent_communication=True,
-        max_iterations=3,
-        confidence_threshold=0.7,
-        verbose=verbose
-    )
-    
-    return MultiAgentSystem(system_config, executor)
+    return MultiAgentSystem(mas_config, executor)
 
 
 def create_multi_agent_system_from_config(
@@ -1908,8 +1967,6 @@ def create_multi_agent_system_from_config(
     # Create system config
     if system_config is None:
         system_config = MultiAgentSystemConfig(
-            enable_parallel_execution=False,
-            enable_agent_communication=True,
             max_iterations=3,
             confidence_threshold=0.7,
             verbose=False

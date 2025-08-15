@@ -44,7 +44,6 @@ class BenchmarkConfig:
     graph_rag: Dict[str, Any]
     task_craft: Dict[str, Any]
     agent: Dict[str, Any]
-    evaluation: Dict[str, Any]
     safety: Dict[str, Any]
     datasets: Dict[str, Any]
     finetuning: Dict[str, Any]
@@ -78,7 +77,6 @@ class ConfigManager:
                 "graph_rag": self._load_yaml_file("graph_rag_config.yaml"),
                 "task_craft": self._load_yaml_file("task_craft_config.yaml"),
                 "agent": self._load_yaml_file("agent_config.yaml"),
-                "evaluation": self._load_yaml_file("evaluation_config.yaml"),
                 "safety": self._load_yaml_file("safety_config.yaml"),
                 "datasets": self._load_yaml_file("datasets_config.yaml"),
                 "finetuning": self._load_yaml_file("finetuning_config.yaml")
@@ -144,7 +142,6 @@ class ConfigManager:
             graph_rag={},
             task_craft={},
             agent={},
-            evaluation={},
             safety={},
             datasets={},
             finetuning={}

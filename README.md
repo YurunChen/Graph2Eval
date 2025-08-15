@@ -18,13 +18,17 @@ Bench is a comprehensive **graph-based LLM benchmarking framework** designed for
 - **📊 Comprehensive Metrics**: Task success rate, safety compliance, attribution accuracy
 - **🔧 Configurable**: Flexible configuration for different use cases
 
-## 🏗️ Agent Architec
+## 🏗️ Agent Architecture
 
-The Benchmark system implements three distinct agent architectures:
+The Benchmark system implements two distinct agent architectures with optional RAG capabilities:
 
-1. **Basic Agent** - A single-agent implementation with core reasoning capabilities
-2. **RAG-enhanced Agent** - Extends the basic agent with Retrieval-Augmented Generation capabilities
-3. **Multi-Agent System** - A collaborative framework with specialized agents:
+1. **Single Agent** - A single-agent implementation with core reasoning capabilities
+   - **No-RAG Mode**: Direct reasoning without knowledge graph retrieval
+   - **RAG Mode**: Enhanced with Retrieval-Augmented Generation capabilities
+
+2. **Multi-Agent System** - A collaborative framework with specialized agents:
+   - **No-RAG Mode**: Multi-agent collaboration without retrieval agent
+   - **RAG Mode**: Full multi-agent system including specialized retrieval agent
 
 ```
 ┌─────────────────────────────────────────────────────────────┐

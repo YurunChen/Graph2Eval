@@ -128,28 +128,24 @@ class BenchmarkRunner:
             from agent_framework.no_rag_agent import NoRAGAgent, NoRAGAgentConfig
             from agent_framework.multi_agent_system import MultiAgentSystem, create_multi_agent_system
             
-            # Get agent type from configuration
+            # Get agent configuration
             agent_config = self.config.agent
-            agent_type = agent_config.get('agent_type', 'rag')  # Default to RAG agent
+            agent_mode = agent_config.get('agent_mode', 'single')  # single, multi
+            agent_type = agent_config.get('agent_type', 'rag')     # no_rag, rag (only used when mode is single)
             
-            # Check if multi-agent system is enabled
-            multi_agent_enabled = agent_config.get('enable_multi_agent', False)
-            
-            if multi_agent_enabled:
+            if agent_mode == 'multi':
                 # Initialize Multi-Agent System
                 logger.info("🤖 Initializing Multi-Agent System")
                 
                 multi_agent_config = agent_config.get('multi_agent', {})
-                model_name = multi_agent_config.get('model_name', 'gpt-4o-mini')
-                enable_evaluation = multi_agent_config.get('enable_evaluation', True)
-                verbose = multi_agent_config.get('verbose', False)
+                system_config = agent_config.get('system', {})
                 
                 # Use shared executor for Multi-Agent System
                 shared_executor = self.components.get('executor')
                 self.components['agent'] = create_multi_agent_system(
-                    model_name=model_name,
-                    enable_evaluation=enable_evaluation,
-                    verbose=verbose,
+                    multi_agent_config=multi_agent_config,
+                    system_config=system_config,
+                    agent_type=agent_type,
                     executor=shared_executor
                 )
                 logger.info("✅ Multi-Agent System initialized")
@@ -158,8 +154,9 @@ class BenchmarkRunner:
                 # Initialize No-RAG Agent
                 logger.info("🤖 Initializing No-RAG Agent")
                 
-                # Get execution config from agent_config
+                # Get execution and system config from agent_config
                 execution_config_data = agent_config.get('execution', {})
+                system_config = agent_config.get('system', {})
                 
                 no_rag_config = NoRAGAgentConfig(
                     model_name=execution_config_data.get('model_name', 'gpt-4o-mini'),
@@ -168,9 +165,8 @@ class BenchmarkRunner:
                     timeout=execution_config_data.get('timeout', 30),
                     max_retries=execution_config_data.get('max_retries', 3),
                     retry_delay=execution_config_data.get('retry_delay', 1.0),
-                    enable_evaluation=agent_config.get('enable_evaluation', True),
                     max_context_length=execution_config_data.get('max_context_length', 4000),
-                    verbose=agent_config.get('verbose', False),
+                    verbose=system_config.get('verbose', False),
                     require_citations=execution_config_data.get('require_citations', False),
                     require_reasoning=execution_config_data.get('require_reasoning', False),
                     response_format=execution_config_data.get('response_format', 'text')
@@ -216,17 +212,18 @@ class BenchmarkRunner:
                 self.components['executor'] = LLMExecutor.get_instance(execution_config)
                 
                 # Initialize RAG Agent
+                system_config = agent_config.get('system', {})
                 rag_agent_config = AgentConfig(
                     retriever_type="hybrid",
                     executor_type="llm",
-                    enable_evaluation=agent_config.get('enable_evaluation', True),
+                    enable_evaluation=system_config.get('enable_evaluation', True),
                     retrieval_config=retrieval_config,
                     execution_config=execution_config,
                     max_context_length=agent_config.get('max_context_length', 4000),
-                    enable_memory=True,
-                    memory_size=10,
-                    verbose=agent_config.get('verbose', False),
-                    log_intermediate=False
+                    enable_memory=system_config.get('enable_memory', True),
+                    memory_size=system_config.get('memory_size', 10),
+                    verbose=system_config.get('verbose', False),
+                    log_intermediate=system_config.get('log_intermediate', False)
                 )
                 
                 # Use shared executor for RAG Agent
@@ -239,68 +236,15 @@ class BenchmarkRunner:
         except ImportError as e:
             logger.warning(f"Agent components not available: {e}")
         
-        # Initialize Safety components (for safety evaluation)
+        # Initialize Safety components (for safety task generation only)
         try:
-            from agent_framework.safety import SafetyTaskGenerator, PolicySuite, PolicyBasedSafetyChecker
+            from task_craft.safety_task_generator import SafetyTaskGenerator
             from datasets.dataset_manager import DatasetManager
             
             # Configure safety task generation
             safety_config = self.config.safety
             safety_generation_config = safety_config.get('safety_task_generation', {})
             graph_based_config = safety_generation_config.get('graph_based_generation', {})
-            
-            # Get the appropriate executor based on agent type (do this first)
-            llm_executor = None
-            if 'executor' in self.components:
-                llm_executor = self.components['executor']
-                logger.info("✅ Using standalone executor for safety checker")
-            elif 'agent' in self.components:
-                agent = self.components['agent']
-                if hasattr(agent, 'executor'):
-                    llm_executor = agent.executor
-                    logger.info("✅ Using agent.executor for safety checker")
-                elif hasattr(agent, 'components') and 'executor' in agent.components:
-                    llm_executor = agent.components['executor']
-                    logger.info("✅ Using agent.components['executor'] for safety checker")
-                elif hasattr(agent, 'agents') and isinstance(agent.agents, dict):
-                    # Multi-agent system - use planner agent's executor
-                    from agent_framework.multi_agent_system import AgentRole
-                    if AgentRole.PLANNER in agent.agents:
-                        llm_executor = agent.agents[AgentRole.PLANNER].executor
-                        logger.info("✅ Using multi-agent planner executor for safety checker")
-                    else:
-                        logger.warning("❌ No planner agent found in multi-agent system")
-                else:
-                    logger.warning("❌ No executor found in agent")
-            else:
-                logger.warning("❌ No executor or agent found in components")
-            
-            if llm_executor is None:
-                logger.warning("⚠️ No LLM executor available for safety checker - will use basic extraction")
-            
-            # Create default policy suite if no policy files specified
-            policy_suites = []
-            policy_files = safety_config.get('policy_files', [])
-            
-            if policy_files:
-                for policy_file in policy_files:
-                    try:
-                        if policy_file.lower().endswith(('.yaml', '.yml')):
-                            suite = PolicySuite.from_yaml(policy_file)
-                        else:
-                            # Assume it's a document file (PDF, HTML, etc.)
-                            suite = PolicySuite.from_document_file(policy_file, llm_executor)
-                        policy_suites.append(suite)
-                        logger.info(f"✅ Loaded policy suite: {suite.name} ({len(suite.rules)} rules)")
-                    except Exception as e:
-                        logger.warning(f"Failed to load policy file {policy_file}: {e}")
-            
-            if not policy_suites:
-                # Create default policy suite
-                from agent_framework.safety import create_default_policy_suite
-                default_suite = create_default_policy_suite()
-                policy_suites.append(default_suite)
-                logger.info(f"✅ Created default policy suite: {default_suite.name} ({len(default_suite.rules)} rules)")
             
             # Initialize safety task generator
             # Get task generation config for safety tasks
@@ -320,27 +264,14 @@ class BenchmarkRunner:
             }
             
             self.components['safety_generator'] = SafetyTaskGenerator(
-                policy_suites=policy_suites,
                 config=safety_config
             )
-            
-            # Initialize safety checker
-            
-            if policy_files:
-                self.components['safety_checker'] = PolicyBasedSafetyChecker(
-                    policy_files=policy_files,
-                    llm_executor=llm_executor
-                )
-            else:
-                # Create safety checker from policy suites
-                self.components['safety_checker'] = PolicyBasedSafetyChecker([], llm_executor)
-                self.components['safety_checker'].policy_suites = policy_suites
             
             # Initialize dataset manager
             datasets_config = self.config.datasets
             self.components['dataset_manager'] = DatasetManager(datasets_config)
             
-            logger.info("✅ Safety components initialized")
+            logger.info("✅ Safety task generation components initialized")
             
         except ImportError as e:
             logger.warning(f"Safety components not available: {e}")
@@ -425,13 +356,16 @@ class BenchmarkRunner:
             )
             
             # Initialize parsers and cleaners
+            image_config = self.config.ingestion.get('image_processing', {})
             self._initialize_component('pdf_parser', PDFParser, config_section=None,
                                      extract_tables=self.config.ingestion.get('parsing', {}).get('pdf_extract_tables', True),
-                                     extract_images=self.config.ingestion.get('parsing', {}).get('pdf_extract_images', False))
+                                     extract_images=self.config.ingestion.get('parsing', {}).get('pdf_extract_images', False),
+                                     image_config=image_config)
             
             self._initialize_component('html_parser', HTMLParser, config_section=None,
                                      extract_links=self.config.ingestion.get('parsing', {}).get('html_extract_links', True),
-                                     extract_images=self.config.ingestion.get('parsing', {}).get('html_extract_images', False))
+                                     extract_images=self.config.ingestion.get('parsing', {}).get('html_extract_images', False),
+                                     image_config=image_config)
             
             self._initialize_component('text_cleaner', TextCleaner, config_section=None, rules=cleaning_rules)
             
@@ -524,10 +458,10 @@ class BenchmarkRunner:
                 logger.info("🤖 Initializing RAG Agent")
                 
                 # Initialize retriever
-                self._initialize_component('retriever', HybridRetriever, 'agent',
-                                         config=RetrievalConfig(
-                                             **self.config.agent.get('retrieval', {})
-                                         ))
+                retrieval_config = RetrievalConfig(
+                    **self.config.agent.get('retrieval', {})
+                )
+                self.components['retriever'] = HybridRetriever(retrieval_config)
                 
                 # Initialize executor - use singleton instance
                 execution_config = ExecutionConfig(
@@ -537,15 +471,15 @@ class BenchmarkRunner:
                 
                 # Initialize RAG Agent with shared executor
                 shared_executor = self.components.get('executor')
+                system_config = self.config.agent.get('system', {})
                 rag_agent_config = AgentConfig(
                     retriever_type="hybrid",
                     executor_type="llm",
-                    **self.config.agent,
                     retrieval_config=self.components['retriever'].config,
                     execution_config=self.components['executor'].config,
-                    enable_memory=True,
-                    memory_size=10,
-                    log_intermediate=False
+                    enable_memory=system_config.get('enable_memory', True),
+                    memory_size=system_config.get('memory_size', 10),
+                    log_intermediate=system_config.get('log_intermediate', False)
                 )
                 self.components['agent'] = RAGAgent(rag_agent_config, shared_executor)
                 
@@ -602,68 +536,15 @@ class BenchmarkRunner:
         except ImportError as e:
             logger.warning(f"TaskCraft components not available: {e}")
         
-        # Initialize Safety components (for safety task generation)
+        # Initialize Safety components (for safety task generation only)
         try:
-            from agent_framework.safety import SafetyTaskGenerator, PolicySuite, PolicyBasedSafetyChecker
+            from task_craft.safety_task_generator import SafetyTaskGenerator
             from datasets.dataset_manager import DatasetManager
             
             # Configure safety task generation
             safety_config = self.config.safety
             safety_generation_config = safety_config.get('safety_task_generation', {})
             graph_based_config = safety_generation_config.get('graph_based_generation', {})
-            
-            # Get the appropriate executor based on agent type (do this first)
-            llm_executor = None
-            if 'executor' in self.components:
-                llm_executor = self.components['executor']
-                logger.info("✅ Using standalone executor for safety checker")
-            elif 'agent' in self.components:
-                agent = self.components['agent']
-                if hasattr(agent, 'executor'):
-                    llm_executor = agent.executor
-                    logger.info("✅ Using agent.executor for safety checker")
-                elif hasattr(agent, 'components') and 'executor' in agent.components:
-                    llm_executor = agent.components['executor']
-                    logger.info("✅ Using agent.components['executor'] for safety checker")
-                elif hasattr(agent, 'agents') and isinstance(agent.agents, dict):
-                    # Multi-agent system - use planner agent's executor
-                    from agent_framework.multi_agent_system import AgentRole
-                    if AgentRole.PLANNER in agent.agents:
-                        llm_executor = agent.agents[AgentRole.PLANNER].executor
-                        logger.info("✅ Using multi-agent planner executor for safety checker")
-                    else:
-                        logger.warning("❌ No planner agent found in multi-agent system")
-                else:
-                    logger.warning("❌ No executor found in agent")
-            else:
-                logger.warning("❌ No executor or agent found in components")
-            
-            if llm_executor is None:
-                logger.warning("⚠️ No LLM executor available for safety checker - will use basic extraction")
-            
-            # Create default policy suite if no policy files specified
-            policy_suites = []
-            policy_files = safety_config.get('policy_files', [])
-            
-            if policy_files:
-                for policy_file in policy_files:
-                    try:
-                        if policy_file.lower().endswith(('.yaml', '.yml')):
-                            suite = PolicySuite.from_yaml(policy_file)
-                        else:
-                            # Assume it's a document file (PDF, HTML, etc.)
-                            suite = PolicySuite.from_document_file(policy_file, llm_executor)
-                        policy_suites.append(suite)
-                        logger.info(f"✅ Loaded policy suite: {suite.name} ({len(suite.rules)} rules)")
-                    except Exception as e:
-                        logger.warning(f"Failed to load policy file {policy_file}: {e}")
-            
-            if not policy_suites:
-                # Create default policy suite
-                from agent_framework.safety import create_default_policy_suite
-                default_suite = create_default_policy_suite()
-                policy_suites.append(default_suite)
-                logger.info(f"✅ Created default policy suite: {default_suite.name} ({len(default_suite.rules)} rules)")
             
             # Initialize safety task generator
             # Get task generation config for safety tasks
@@ -683,27 +564,14 @@ class BenchmarkRunner:
             }
             
             self.components['safety_generator'] = SafetyTaskGenerator(
-                policy_suites=policy_suites,
                 config=safety_config
             )
-            
-            # Initialize safety checker
-            
-            if policy_files:
-                self.components['safety_checker'] = PolicyBasedSafetyChecker(
-                    policy_files=policy_files,
-                    llm_executor=llm_executor
-                )
-            else:
-                # Create safety checker from policy suites
-                self.components['safety_checker'] = PolicyBasedSafetyChecker([], llm_executor)
-                self.components['safety_checker'].policy_suites = policy_suites
             
             # Initialize dataset manager
             datasets_config = self.config.datasets
             self.components['dataset_manager'] = DatasetManager(datasets_config)
             
-            logger.info("✅ Safety components initialized")
+            logger.info("✅ Safety task generation components initialized")
             
         except ImportError as e:
             logger.warning(f"Safety components not available: {e}")
@@ -714,10 +582,16 @@ class BenchmarkRunner:
         logger.info(f"📄 Processing {len(input_documents)} documents")
         
         self.start_time = time.time()
+        # Get agent configuration
+        agent_mode = self.config.agent.get('agent_mode', 'single')
+        agent_type = self.config.agent.get('agent_type', 'rag')
+        
         results = {
             "start_time": datetime.now().isoformat(),
             "config": {
                 "model_name": self.config.agent.get('execution', {}).get('model_name', 'gpt-4o-mini'),
+                "agent_mode": agent_mode,
+                "agent_type": agent_type,
                 "max_tasks": self.config.task_craft.get('generation', {}).get('max_total_tasks', 5),
                 "storage_backend": self.config.graph_rag.get('storage', {}).get('backend', 'json')
             },
@@ -864,13 +738,15 @@ class BenchmarkRunner:
         
             self.start_time = time.time()
             # Determine agent type
-            multi_agent_enabled = self.config.agent.get('enable_multi_agent', False)
+            agent_mode = self.config.agent.get('agent_mode', 'single')
+            multi_agent_enabled = (agent_mode == 'multi')
             agent_type = "multi_agent" if multi_agent_enabled else self.config.agent.get('agent_type')
             
             results = {
                 "start_time": datetime.now().isoformat(),
                 "config": {
                     "model_name": self.config.agent.get('execution', {}).get('model_name', 'gpt-4o-mini'),
+                    "agent_mode": agent_mode,
                     "agent_type": agent_type,
                     "dataset_path": dataset_path,
                     "graph_path": graph_path,
@@ -1579,7 +1455,6 @@ class BenchmarkRunner:
         logger.info(f"📊 Normal tasks: {len(normal_tasks_to_execute)}")
         logger.info(f"📊 Safety tasks: {len(safety_tasks_to_execute)}")
         logger.info(f"📊 Configuration: max_total={max_total_tasks}, max_normal={max_normal_tasks}, max_safety={max_safety_tasks}")
-        logger.info(f"📊 Safety enabled: {safety_tasks_enabled}")
         logger.info(f"{'='*60}\n")
         
         # Get graph from components if available
@@ -1600,14 +1475,6 @@ class BenchmarkRunner:
         
         for task in tasks_to_execute:
             try:
-                # Safety check for safety tasks
-                safety_check_result = None
-                safety_check_enabled = safety_tasks_config.get('safety_check_enabled', True)
-                if (safety_check_enabled and 
-                    'safety_checker' in self.components and 
-                    TaskType.is_safety_task(task.task_type)):
-                    safety_check_result = self.components['safety_checker'].check_task(task)
-                    logger.debug(f"🔒 Safety check for task {task.task_id}: {safety_check_result.safety_level.value}")
                 
                 if 'agent' in self.components:
                     # Use unified agent interface
@@ -1851,9 +1718,7 @@ class BenchmarkRunner:
                         task.gold_answer if hasattr(task, 'gold_answer') and task.gold_answer else ""
                     )
                     
-                    # Add safety check result to mock execution result
-                    if safety_check_result:
-                        result.safety_check = safety_check_result.to_dict()
+
                     
                     execution_results.append(result)
                     successful_executions += 1
@@ -1869,6 +1734,12 @@ class BenchmarkRunner:
         # Close progress bar
         pbar.close()
         
+        # Calculate token usage statistics
+        total_tokens = sum(r.tokens_used for r in execution_results)
+        avg_tokens = total_tokens / len(execution_results) if execution_results else 0
+        max_tokens = max(r.tokens_used for r in execution_results) if execution_results else 0
+        min_tokens = min(r.tokens_used for r in execution_results) if execution_results else 0
+        
         # Print execution results summary
         logger.info(f"{'='*60}")
         logger.info("🏃‍♂️ EXECUTION RESULTS SUMMARY")
@@ -1877,6 +1748,9 @@ class BenchmarkRunner:
         logger.info(f"❌ Failed executions: {failed_executions}")
         logger.info(f"📊 Success rate: {successful_executions/len(execution_results)*100:.1f}%")
         logger.info(f"⏱️  Average execution time: {sum(r.execution_time for r in execution_results)/len(execution_results):.2f}s")
+        logger.info(f"🔤 Total tokens used: {total_tokens:,}")
+        logger.info(f"🔤 Average tokens per task: {avg_tokens:.1f}")
+        logger.info(f"🔤 Token range: {min_tokens} - {max_tokens}")
         logger.info(f"⏱️  Total processing time: {time.time() - stage_start:.2f}s")
         logger.info(f"{'='*60}\n")
         
@@ -1894,6 +1768,10 @@ class BenchmarkRunner:
                 "failed_executions": failed_executions,
                 "success_rate": successful_executions / len(execution_results) if execution_results else 0,
                 "avg_execution_time": sum(r.execution_time for r in execution_results) / len(execution_results) if execution_results else 0,
+                "total_tokens_used": total_tokens,
+                "avg_tokens_per_task": avg_tokens,
+                "max_tokens_per_task": max_tokens,
+                "min_tokens_per_task": min_tokens,
                 "processing_time": time.time() - stage_start,
                 "results": [r.to_dict() for r in execution_results]
             }, f, indent=2, ensure_ascii=False)
@@ -1906,6 +1784,10 @@ class BenchmarkRunner:
             "failed_executions": failed_executions,
             "success_rate": successful_executions / len(execution_results) if execution_results else 0,
             "avg_execution_time": sum(r.execution_time for r in execution_results) / len(execution_results) if execution_results else 0,
+            "total_tokens_used": total_tokens,
+            "avg_tokens_per_task": avg_tokens,
+            "max_tokens_per_task": max_tokens,
+            "min_tokens_per_task": min_tokens,
             "processing_time": time.time() - stage_start,
             "results": [r.to_dict() for r in execution_results]
         }
@@ -1932,12 +1814,8 @@ class BenchmarkRunner:
         task_node = len(tasks) if tasks else 0
         task_node_expand = len(tasks) if tasks else 0
         
-        # 从evaluation_config.yaml读取evaluation配置
-        evaluation_config = self.config.evaluation
-        evaluation_enabled = evaluation_config.get('enabled', True)
-        if not evaluation_enabled:
-            logger.warning("❌ Evaluation disabled in configuration")
-            return {"evaluations_completed": 0, "processing_time": 0}
+        # 评估配置（现在使用默认配置）
+        evaluation_config = {}
         
         # Initialize detailed metrics tracking
         task_metrics = []
@@ -2031,7 +1909,11 @@ class BenchmarkRunner:
             # Special LLM-based safety evaluation for safety tasks
             safety_eval_data = {}
             if is_safety_task:
-                safety_evaluator = LLMBasedSafetyEvaluator()
+                # Get safety evaluation configuration from policy_extraction
+                safety_config = self.config.safety
+                policy_extraction_config = safety_config.get('safety_policy', {}).get('policy_extraction', {})
+                
+                safety_evaluator = LLMBasedSafetyEvaluator(config=policy_extraction_config)
                 safety_eval = safety_evaluator.evaluate(task, exec_result)
                 
                 # Update safety metrics
@@ -2066,6 +1948,10 @@ class BenchmarkRunner:
                 # Store safety evaluation data
                 safety_eval_data = safety_eval.details.get('safety', {})
             
+            # Get token usage information
+            tokens_used = result.get("tokens_used", 0)
+            model_used = result.get("model_used", "unknown")
+            
             # Record task metrics
             task_metric = {
                 "task_id": task_id,
@@ -2076,6 +1962,8 @@ class BenchmarkRunner:
                 "response": response,
                 "gold_answer": gold_answer,
                 "execution_time": execution_time,
+                "tokens_used": tokens_used,
+                "model_used": model_used,
                 "overall_score": eval_result.overall_score,
                 "f1_score": eval_result.f1_score,
                 "exact_match": eval_result.exact_match,
@@ -2148,18 +2036,6 @@ class BenchmarkRunner:
         # Close evaluation progress bar
         eval_pbar.close()
         
-        # Print evaluation summary
-        logger.info(f"{'='*60}")
-        logger.info("📊 EVALUATION RESULTS SUMMARY")
-        logger.info(f"{'='*60}")
-        logger.info(f"📊 Total tasks evaluated: {total_tasks}")
-        logger.info(f"🔒 Safety tasks: {safety_tasks_processed}")
-        logger.info(f"🔒 Safety violations: {safety_violations}")
-        if safety_tasks_processed > 0:
-            logger.info(f"🛡️  Safety compliance rate: {safety_metrics['safety_compliance_rate']:.1%}")
-        logger.info(f"⏱️  Total evaluation time: {time.time() - stage_start:.2f}s")
-        logger.info(f"{'='*60}\n")
-        
         # Calculate overall metrics with GraphRAG-focused evaluation
         overall_metrics = {
             "total_tasks": total_tasks,
@@ -2167,6 +2043,11 @@ class BenchmarkRunner:
             "normal_tasks": total_tasks - safety_tasks_processed,
             # Agent type distribution
             "agent_type_distribution": {},
+            # Token usage metrics
+            "total_tokens_used": sum(tm["tokens_used"] for tm in task_metrics),
+            "avg_tokens_per_task": sum(tm["tokens_used"] for tm in task_metrics) / total_tasks,
+            "max_tokens_per_task": max(tm["tokens_used"] for tm in task_metrics),
+            "min_tokens_per_task": min(tm["tokens_used"] for tm in task_metrics),
             # GraphRAG-specific metrics averages
             "pass_rate": sum(tm["pass_rate"] for tm in task_metrics) / total_tasks,
             "task_node": sum(tm["task_node"] for tm in task_metrics) / total_tasks,
@@ -2201,6 +2082,21 @@ class BenchmarkRunner:
             agent_type = tm.get("agent_type", "unknown")
             agent_type_counts[agent_type] = agent_type_counts.get(agent_type, 0) + 1
         overall_metrics["agent_type_distribution"] = agent_type_counts
+        
+        # Print evaluation summary
+        logger.info(f"{'='*60}")
+        logger.info("📊 EVALUATION RESULTS SUMMARY")
+        logger.info(f"{'='*60}")
+        logger.info(f"📊 Total tasks evaluated: {total_tasks}")
+        logger.info(f"🔒 Safety tasks: {safety_tasks_processed}")
+        logger.info(f"🔒 Safety violations: {safety_violations}")
+        if safety_tasks_processed > 0:
+            logger.info(f"🛡️  Safety compliance rate: {safety_metrics['safety_compliance_rate']:.1%}")
+        logger.info(f"🔤 Total tokens used: {overall_metrics['total_tokens_used']:,}")
+        logger.info(f"🔤 Average tokens per task: {overall_metrics['avg_tokens_per_task']:.1f}")
+        logger.info(f"🔤 Token range: {overall_metrics['min_tokens_per_task']} - {overall_metrics['max_tokens_per_task']}")
+        logger.info(f"⏱️  Total evaluation time: {time.time() - stage_start:.2f}s")
+        logger.info(f"{'='*60}\n")
         
         # Save evaluation results to unified output directory
         base_dir = self._get_output_base_dir()
@@ -2383,7 +2279,21 @@ class BenchmarkRunner:
         print(f"Status: {'✅ SUCCESS' if results.get('success') else '❌ FAILED'}")
         print(f"Total Time: {results.get('total_time', 0):.2f}s")
         print(f"Model: {results['config']['model_name']}")
-        print(f"Agent Type: {results['config'].get('agent_type', 'unknown')}")
+        
+        # Agent configuration details
+        agent_mode = results['config'].get('agent_mode', 'single')
+        agent_type = results['config'].get('agent_type', 'rag')
+        print(f"Agent Mode: {agent_mode}")
+        print(f"Agent Type: {agent_type}")
+        
+        if agent_mode == 'multi':
+            print(f"Multi-Agent System: Enabled")
+        else:
+            print(f"Single Agent Configuration")
+            if agent_type == 'rag':
+                print(f"RAG Mode: Enabled")
+            else:
+                print(f"RAG Mode: Disabled (No-RAG)")
         
         # Check if this is dataset generation or evaluation
         if 'dataset_path' in results['config']:
@@ -2435,6 +2345,9 @@ class BenchmarkRunner:
                 print(f"  Tasks executed: {stage_data.get('tasks_executed', 0)}")
                 print(f"  Success rate: {stage_data.get('success_rate', 0):.1%}")
                 print(f"  Avg execution time: {stage_data.get('avg_execution_time', 0):.2f}s")
+                print(f"  Total tokens used: {stage_data.get('total_tokens_used', 0):,}")
+                print(f"  Avg tokens per task: {stage_data.get('avg_tokens_per_task', 0):.1f}")
+                print(f"  Token range: {stage_data.get('min_tokens_per_task', 0)} - {stage_data.get('max_tokens_per_task', 0)}")
             elif stage_name == 'evaluation':
                 print(f"  Evaluations completed: {stage_data.get('evaluations_completed', 0)}")
                 metrics = stage_data.get('metrics', {})
@@ -2481,6 +2394,20 @@ class BenchmarkRunner:
                         value = metrics[metric]
                         if isinstance(value, float):
                             print(f"    {metric}: {value:.3f}")
+                        else:
+                            print(f"    {metric}: {value}")
+                
+                # Token usage metrics
+                print(f"  🔤 Token Usage Metrics:")
+                token_metrics = ['total_tokens_used', 'avg_tokens_per_task', 'max_tokens_per_task', 'min_tokens_per_task']
+                for metric in token_metrics:
+                    if metric in metrics:
+                        value = metrics[metric]
+                        if isinstance(value, float):
+                            if metric == 'avg_tokens_per_task':
+                                print(f"    {metric}: {value:.1f}")
+                            else:
+                                print(f"    {metric}: {value:,.0f}")
                         else:
                             print(f"    {metric}: {value}")
                 
@@ -2634,18 +2561,49 @@ def main():
         logger.info(f"💾 Storage: {runner.config.graph_rag.get('storage', {}).get('backend')}")
         logger.info(f"🎯 Mode: {args.mode}")
         
-        # Check if multi-agent is enabled
-        multi_agent_enabled = runner.config.agent.get('enable_multi_agent', False)
-        agent_type = "multi_agent" if multi_agent_enabled else runner.config.agent.get('agent_type')
+        # Agent configuration details
+        agent_mode = runner.config.agent.get('agent_mode', 'single')
+        agent_type = runner.config.agent.get('agent_type', 'rag')
+        logger.info(f"🤖 Agent Mode: {agent_mode}")
         logger.info(f"🤖 Agent Type: {agent_type}")
-        if multi_agent_enabled:
-            logger.info(f"🤖 Multi-Agent System: Enabled")
+        
+        if agent_mode == 'multi':
             multi_agent_config = runner.config.agent.get('multi_agent', {})
-            logger.info(f"   Model: {multi_agent_config.get('model_name', 'gpt-4o-mini')}")
-            logger.info(f"   Evaluation: {multi_agent_config.get('enable_evaluation', True)}")
-            logger.info(f"   Evaluation: {multi_agent_config.get('enable_evaluation', True)}")
+            logger.info(f"    Multi-Agent Configuration:")
+            logger.info(f"     - Max Iterations: {multi_agent_config.get('max_iterations', 3)}")
+            logger.info(f"     - Confidence Threshold: {multi_agent_config.get('confidence_threshold', 0.7)}")
+            
+            # Show agent roles configuration
+            agents_config = multi_agent_config.get('agents', {})
+            if agents_config:
+                logger.info(f"   Agent Roles:")
+                for role, config in agents_config.items():
+                    model = config.get('model_name', 'gpt-4o-mini')
+                    
+                    # Special handling for retriever based on agent_type
+                    if role == 'retriever':
+                        if agent_type == 'no_rag':
+                            status = "❌ Disabled (no_rag mode)"
+                        else:
+                            enabled = config.get('enabled', True) if 'enabled' in config else True
+                            status = "✅ Enabled" if enabled else "❌ Disabled"
+                    else:
+                        enabled = config.get('enabled', True) if 'enabled' in config else True
+                        status = "✅ Enabled" if enabled else "❌ Disabled"
+                    
+                    logger.info(f"     - {role.capitalize()}: {model} ({status})")
         else:
-            logger.info(f"🤖 Multi-Agent System: Disabled")
+            # Single agent mode - show configuration details
+            logger.info(f"   Single Agent Configuration:")
+            if agent_type == 'rag':
+                logger.info(f"     - Retrieval: Enabled")
+                retrieval_config = runner.config.agent.get('retrieval', {})
+                logger.info(f"       * Max Nodes: {retrieval_config.get('max_nodes', 10)}")
+                logger.info(f"       * Max Hops: {retrieval_config.get('max_hops', 3)}")
+                logger.info(f"       * Similarity Threshold: {retrieval_config.get('similarity_threshold', 0.7)}")
+            else:
+                logger.info(f"     - Retrieval: Disabled (No-RAG mode)")
+        
         logger.info(f"{'='*60}\n")
         
         if args.mode == "generate":

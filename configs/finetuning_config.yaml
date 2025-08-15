@@ -2,7 +2,7 @@
 
 # Finetuning settings
 finetuning:
-  enabled: false  # 默认关闭
+  enabled: false  # Default Off
   strategy: "lora"  # full, lora, adapter
   base_model: "gpt-4o-mini"
   model_type: "causal_lm"

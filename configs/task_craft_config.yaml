@@ -1,38 +1,150 @@
-# TaskCraft configuration - Simplified version
+# TaskCraft Configuration
+# Configuration for task generation from document graphs
 
-# Task generation configuration
+# Task generation settings
 generation:
-  max_tasks_per_template: 10
-  max_total_tasks: 20
+  max_total_tasks: 1000
+  require_gold_answer: false
+  require_citations: true
+  require_reasoning: false
   min_content_length: 50
-  require_gold_answer: true
-  require_citations: true   # RAG agent needs citations
-  require_reasoning: true   # RAG agent needs reasoning
   avoid_duplicates: true
-  random_seed: 42
-  shuffle_tasks: true
   
-  # Quality control thresholds (simplified - only for deduplication)
-  content_overlap_threshold: 0.8 # Content overlap threshold for deduplication
+  # Quality control thresholds
+  min_specificity_score: 1
+  max_generic_phrases: 2
+  max_clause_complexity: 3
+  content_overlap_threshold: 0.7
+  min_content_complexity: 0.2
+  max_content_complexity: 0.9
   
-  # LLM-based task generation
-  use_llm_generation: true  # Enable LLM-based task generation
-  llm_model_name: gpt-4o-mini
+  # LLM-based generation
+  use_llm_generation: true  # Enable LLM generation for all task types
+  llm_model_name: "gpt-4o-mini"
   llm_temperature: 0.7
-  llm_max_tokens: 9000
+  llm_max_tokens: 1500  # Increased for multi-hop tasks
   
-  # LLM-based quality assessment
-  use_llm_quality_check: true  # Enable LLM-based quality assessment
-  quality_check_model: gpt-4o-mini
-  quality_check_temperature: 0.3
+  # LLM-based quality control
+  use_llm_quality_check: true  # 启用LLM质量检查
+  llm_quality_threshold: 0.7
   quality_check_max_tokens: 2000
-  llm_quality_threshold: 0.6  # Minimum quality score threshold (increased for better quality)
+  llm_quality_temperature: 0.3
+  
+  # Multi-hop task generation
+  enable_multi_hop_generation: true
+  multi_hop_min_hops: 2
+  multi_hop_max_hops: 5
+  multi_hop_min_nodes_per_hop: 1
+  multi_hop_max_nodes_per_hop: 3
+  
+  # Randomization
+  random_seed: null  # Will use global seed if null
+  shuffle_tasks: true
 
 # Subgraph sampling configuration
 subgraph_sampling:
-  sampling_strategy: "random"  # random, motif_based, centrality_based, semantic_based, hybrid
-  max_samples_per_template: 5 
+  max_samples_per_template: 5
+  max_subgraph_size: 8
   min_subgraph_size: 1
-  max_subgraph_size: 6 
-  avoid_disconnected: true
-  ensure_diversity: true
+  sampling_strategy: "random"  # random, motif_based, centrality_based, semantic_based
+  
+  # Sampling strategy specific parameters
+  random:
+    seed: null
+    
+  motif_based:
+    min_motif_size: 3
+    max_motif_size: 6
+    motif_types: ["triangle", "star", "path"]
+    
+  centrality_based:
+    centrality_metric: "betweenness"  # degree, closeness, betweenness, eigenvector
+    top_k_percent: 0.3
+    
+  semantic_based:
+    similarity_threshold: 0.7
+    max_semantic_distance: 0.5
+
+# Multi-hop generation configuration
+multi_hop_generation:
+  enable_multi_hop_generation: true
+  min_hops: 2
+  max_hops: 5
+  min_nodes_per_hop: 1
+  max_nodes_per_hop: 3
+  
+  # Reasoning chain types
+  reasoning_chain_types:
+    - "fact_verification"
+    - "comparison"
+    - "analysis"
+    - "synthesis"
+    - "causal_reasoning"
+  
+  # Edge type mapping
+  edge_type_mapping:
+    fact_verification: "supports_fact"
+    comparison: "comparison_link"
+    analysis: "analysis_step"
+    synthesis: "synthesis_link"
+    causal_reasoning: "causal_link"
+  
+  # Quality thresholds for multi-hop tasks
+  min_chain_length: 2
+  max_chain_length: 5
+  require_diverse_nodes: true
+  min_node_diversity: 0.5
+
+# Template filtering
+template_filtering:
+  allowed_task_types: []  # Empty means all types allowed
+  allowed_difficulties: []  # Empty means all difficulties allowed
+  excluded_templates: []  # List of template IDs to exclude
+  
+  # Task type specific settings
+  extraction:
+    max_tasks_per_template: 10
+    require_entities: true
+    
+  comparison:
+    max_tasks_per_template: 8
+    require_multiple_sources: true
+    
+  summarization:
+    max_tasks_per_template: 6
+    require_structure: true
+    
+  reasoning:
+    max_tasks_per_template: 8
+    require_logical_chain: true
+    
+  table_qa:
+    max_tasks_per_template: 12
+    require_numerical_analysis: true
+    
+  figure_interpretation:
+    max_tasks_per_template: 8
+    require_visual_analysis: true
+    include_images: true  # Include actual image files in tasks
+    image_task_types: ["image_description", "image_analysis", "image_comparison"]
+    
+  cross_reference:
+    max_tasks_per_template: 6
+    require_reference_links: true
+    
+  aggregation:
+    max_tasks_per_template: 5
+    require_multiple_sources: true
+
+# Output configuration
+output:
+  save_tasks: true
+  output_format: "json"  # json, csv, yaml
+  include_quality_scores: true
+  include_variables: true
+  include_subgraph_info: true
+  
+  # File naming
+  filename_prefix: "generated_tasks"
+  include_timestamp: true
+  include_template_info: true

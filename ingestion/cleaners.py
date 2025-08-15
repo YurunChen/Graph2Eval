@@ -94,9 +94,11 @@ class TextCleaner(DocumentCleaner):
             cleaned_element = self._clean_element(element)
             
             # Filter out elements that are too short after cleaning
-            if (cleaned_element and 
-                len(cleaned_element.content.strip()) >= self.rules.min_content_length):
-                cleaned_elements.append(cleaned_element)
+            # Skip length check for figure and table elements
+            if cleaned_element:
+                if (element.element_type in ["figure", "table"] or 
+                    len(cleaned_element.content.strip()) >= self.rules.min_content_length):
+                    cleaned_elements.append(cleaned_element)
         
         # Remove duplicate elements
         if self.rules.remove_duplicate_lines:

@@ -8,7 +8,6 @@ from .retrievers import SubgraphRetriever, HybridRetriever, ContextualRetriever
 from .executors import LLMExecutor, MultiStepExecutor, TaskExecutor, ExecutionConfig
 from .evaluators import TaskEvaluator, MultiDimensionalEvaluator
 from .attributors import FailureAttributor
-from .safety import PolicySuite
 
 __all__ = [
     "RAGAgent",
@@ -28,6 +27,4 @@ __all__ = [
     "TaskEvaluator",
     "MultiDimensionalEvaluator",
     "FailureAttributor",
-
-    "PolicySuite"
 ]

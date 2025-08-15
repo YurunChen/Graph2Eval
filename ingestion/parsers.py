@@ -55,14 +55,20 @@ class DocumentParser(ABC):
 class PDFParser(DocumentParser):
     """Enhanced PDF parser with table and figure detection"""
     
-    def __init__(self, extract_tables: bool = True, extract_images: bool = True):
+    def __init__(self, extract_tables: bool = True, extract_images: bool = True, 
+                 image_config: Optional[Dict[str, Any]] = None):
         self.extract_tables = extract_tables
         self.extract_images = extract_images
+        self.image_config = image_config or {}
+        self.current_pdf_path = None  # Store current PDF path for image extraction
         
     def parse(self, file_path: Union[str, Path]) -> DocumentStructure:
         """Parse PDF with structure detection"""
         file_path = Path(file_path)
         logger.info(f"Parsing PDF: {file_path}")
+        
+        # Store PDF path for image extraction
+        self.current_pdf_path = str(file_path)
         
         elements = []
         metadata = {}
@@ -183,22 +189,88 @@ class PDFParser(DocumentParser):
         return elements
     
     def _extract_images(self, page, page_num: int) -> List[ParsedElement]:
-        """Extract images from page"""
+        """Extract images from page and save to files"""
         elements = []
         
         try:
-            # This is a simplified implementation
-            # In practice, you'd use libraries like pymupdf for better image extraction
+            # Use pymupdf for better image extraction
+            import fitz
+            
+            # Open the PDF file directly with pymupdf
+            if not self.current_pdf_path:
+                raise ValueError("PDF path not available for image extraction")
+            doc = fitz.open(self.current_pdf_path)
+            page_index = page_num - 1  # Convert to 0-based index
+            
+            # Get the pymupdf page
+            pymupdf_page = doc[page_index]
+            
+            # Get images using pymupdf
+            image_list = pymupdf_page.get_images()
+            
+            for i, img_info in enumerate(image_list):
+                image_path = None
+                
+                logger.debug(f"Image {i} on page {page_num}: {img_info}")
+                
+                # Save image if configured
+                if self.image_config.get('save_images', False):
+                    image_path = self._save_image_with_pymupdf(doc, img_info, page_num, i)
+                
+                element = ParsedElement(
+                    element_type="figure",
+                    content=f"[Image: {img_info[0] if img_info else 'unnamed'}]",
+                    metadata={
+                        "width": img_info[2] if img_info else 0,
+                        "height": img_info[3] if img_info else 0,
+                        "image_path": image_path
+                    },
+                    page_num=page_num,
+                    bbox=(0, 0, img_info[2] if img_info else 0, img_info[3] if img_info else 0),
+                    element_id=f"page_{page_num}_image_{i}"
+                )
+                
+                elements.append(element)
+            
+            doc.close()
+                
+        except ImportError:
+            logger.warning("pymupdf not available, falling back to pdfplumber image extraction")
+            # Fallback to pdfplumber
+            elements = self._extract_images_fallback(page, page_num)
+        except Exception as e:
+            logger.warning(f"Error extracting images from page {page_num}: {e}")
+            
+        return elements
+    
+    def _extract_images_fallback(self, page, page_num: int) -> List[ParsedElement]:
+        """Fallback image extraction using pdfplumber"""
+        elements = []
+        
+        try:
             images = page.images
             
             for i, img in enumerate(images):
+                image_path = None
+                
+                # Check if this is a real image or just an image mask
+                is_image_mask = img.get('imagemask', False)
+                if is_image_mask:
+                    logger.info(f"Skipping image mask on page {page_num}, image {i}")
+                    continue
+                
+                # Save image if configured
+                if self.image_config.get('save_images', False):
+                    image_path = self._save_image(img, page_num, i)
+                
                 element = ParsedElement(
                     element_type="figure",
                     content=f"[Image: {img.get('name', 'unnamed')}]",
                     metadata={
                         "image_data": img,
                         "width": img.get("width", 0),
-                        "height": img.get("height", 0)
+                        "height": img.get("height", 0),
+                        "image_path": image_path
                     },
                     page_num=page_num,
                     bbox=(img.get("x0", 0), img.get("top", 0), 
@@ -209,9 +281,140 @@ class PDFParser(DocumentParser):
                 elements.append(element)
                 
         except Exception as e:
-            logger.warning(f"Error extracting images from page {page_num}: {e}")
+            logger.warning(f"Error in fallback image extraction: {e}")
             
         return elements
+    
+    def _save_image(self, img, page_num: int, image_index: int) -> Optional[str]:
+        """Save image to file and return the path"""
+        try:
+            # Get image configuration
+            output_dir = Path(self.image_config.get('image_output_dir', 'data/images'))
+            image_format = self.image_config.get('image_format', 'png')
+            max_size = self.image_config.get('max_image_size', 2048)
+            compress = self.image_config.get('compress_images', True)
+            quality = self.image_config.get('image_quality', 85)
+            
+            # Create output directory
+            output_dir.mkdir(parents=True, exist_ok=True)
+            
+            # Generate filename
+            filename = f"page_{page_num}_image_{image_index}.{image_format}"
+            image_path = output_dir / filename
+            
+            # Get image data
+            image_stream = img.get('stream')
+            if not image_stream:
+                logger.warning(f"No image data found for image {image_index} on page {page_num}")
+                return None
+            
+            # Convert PDFStream to bytes
+            try:
+                if hasattr(image_stream, 'get_data'):
+                    # PDFStream object
+                    image_data = image_stream.get_data()
+                elif hasattr(image_stream, 'read'):
+                    # File-like object
+                    image_stream.seek(0)  # Reset to beginning
+                    image_data = image_stream.read()
+                elif isinstance(image_stream, bytes):
+                    # Already bytes
+                    image_data = image_stream
+                else:
+                    # Try to convert to bytes
+                    image_data = bytes(image_stream)
+                
+                # Validate that we have actual image data
+                if not image_data or len(image_data) < 100:
+                    logger.warning(f"Image data too small or empty: {len(image_data) if image_data else 0} bytes")
+                    return None
+                    
+                # Debug: log the first few bytes to understand the format
+                logger.debug(f"Image data first 20 bytes: {image_data[:20]}")
+                
+                # Check if it's valid image data by looking for common image headers
+                if (image_data.startswith(b'\x89PNG\r\n\x1a\n') or  # PNG
+                    image_data.startswith(b'\xff\xd8\xff') or      # JPEG
+                    image_data.startswith(b'GIF8') or             # GIF
+                    image_data.startswith(b'BM') or               # BMP
+                    image_data.startswith(b'%!PS') or             # PostScript
+                    image_data.startswith(b'%PDF')):              # PDF
+                    logger.info(f"Valid image format detected")
+                else:
+                    # Try to convert PDF image data to PNG using PIL
+                    try:
+                        from PIL import Image
+                        import io
+                        
+                        # Try to open as image (PIL can handle many formats)
+                        img = Image.open(io.BytesIO(image_data))
+                        
+                        # Convert to PNG and save
+                        img_buffer = io.BytesIO()
+                        img.save(img_buffer, format='PNG')
+                        image_data = img_buffer.getvalue()
+                        
+                        logger.info(f"Successfully converted image to PNG format")
+                        
+                    except Exception as pil_error:
+                        logger.warning(f"Failed to convert image with PIL: {pil_error}")
+                        logger.warning(f"Image data doesn't have valid image header and conversion failed")
+                        return None
+                    
+            except Exception as e:
+                logger.warning(f"Failed to extract image data: {e}")
+                return None
+            
+            # Save image
+            with open(image_path, 'wb') as f:
+                f.write(image_data)
+            
+            logger.info(f"Saved image: {image_path}")
+            return str(image_path)
+            
+        except Exception as e:
+            logger.error(f"Error saving image: {e}")
+            return None
+    
+    def _save_image_with_pymupdf(self, doc, img_info, page_num: int, image_index: int) -> Optional[str]:
+        """Save image using pymupdf and return the path"""
+        try:
+            # Get image configuration
+            output_dir = Path(self.image_config.get('image_output_dir', 'data/images'))
+            image_format = self.image_config.get('image_format', 'png')
+            
+            # Create output directory
+            output_dir.mkdir(parents=True, exist_ok=True)
+            
+            # Generate filename
+            filename = f"page_{page_num}_image_{image_index}.{image_format}"
+            image_path = output_dir / filename
+            
+            # Extract image using pymupdf
+            import fitz
+            
+            xref = img_info[0]
+            pix = fitz.Pixmap(doc, xref)
+            
+            if pix.n - pix.alpha < 4:  # GRAY or RGB
+                img_data = pix.tobytes("png")
+            else:  # CMYK: convert to RGB first
+                pix1 = fitz.Pixmap(fitz.csRGB, pix)
+                img_data = pix1.tobytes("png")
+                pix1 = None
+            
+            # Save image
+            with open(image_path, 'wb') as f:
+                f.write(img_data)
+            
+            pix = None
+            
+            logger.info(f"Saved image with pymupdf: {image_path}")
+            return str(image_path)
+            
+        except Exception as e:
+            logger.error(f"Error saving image with pymupdf: {e}")
+            return None
     
     def _group_words_to_lines(self, words: List[Dict]) -> List[List[Dict]]:
         """Group words into lines based on y-coordinate"""
@@ -336,9 +539,11 @@ class PDFParser(DocumentParser):
 class HTMLParser(DocumentParser):
     """HTML parser with semantic structure extraction"""
     
-    def __init__(self, extract_links: bool = True, extract_images: bool = True):
+    def __init__(self, extract_links: bool = True, extract_images: bool = True,
+                 image_config: Optional[Dict[str, Any]] = None):
         self.extract_links = extract_links
         self.extract_images = extract_images
+        self.image_config = image_config or {}
         
     def parse(self, file_path: Union[str, Path]) -> DocumentStructure:
         """Parse HTML with semantic structure"""
@@ -510,12 +715,17 @@ class HTMLParser(DocumentParser):
         return elements
     
     def _extract_images(self, soup: BeautifulSoup) -> List[ParsedElement]:
-        """Extract image elements"""
+        """Extract image elements and save to files"""
         elements = []
         
         for i, img in enumerate(soup.find_all('img')):
             src = img.get('src', '')
             alt = img.get('alt', '')
+            image_path = None
+            
+            # Save image if configured and src is a local file
+            if self.image_config.get('save_images', False) and src:
+                image_path = self._save_html_image(src, i)
             
             element = ParsedElement(
                 element_type="figure",
@@ -526,13 +736,59 @@ class HTMLParser(DocumentParser):
                     "alt": alt,
                     "width": img.get('width', ''),
                     "height": img.get('height', ''),
-                    "class": img.get('class', [])
+                    "class": img.get('class', []),
+                    "image_path": image_path
                 },
                 element_id=f"image_{i}"
             )
             elements.append(element)
             
         return elements
+    
+    def _save_html_image(self, src: str, image_index: int) -> Optional[str]:
+        """Save HTML image to file and return the path"""
+        try:
+            # Get image configuration
+            output_dir = Path(self.image_config.get('image_output_dir', 'data/images'))
+            image_format = self.image_config.get('image_format', 'png')
+            
+            # Create output directory
+            output_dir.mkdir(parents=True, exist_ok=True)
+            
+            # Generate filename
+            filename = f"html_image_{image_index}.{image_format}"
+            image_path = output_dir / filename
+            
+            # Handle different src types
+            if src.startswith('data:'):
+                # Data URL
+                import base64
+                header, data = src.split(',', 1)
+                image_data = base64.b64decode(data)
+            elif src.startswith('http'):
+                # Remote URL - skip for now (could add download functionality)
+                logger.info(f"Skipping remote image: {src}")
+                return None
+            else:
+                # Local file path
+                src_path = Path(src)
+                if src_path.exists():
+                    with open(src_path, 'rb') as f:
+                        image_data = f.read()
+                else:
+                    logger.warning(f"Image file not found: {src}")
+                    return None
+            
+            # Save image
+            with open(image_path, 'wb') as f:
+                f.write(image_data)
+            
+            logger.info(f"Saved HTML image: {image_path}")
+            return str(image_path)
+            
+        except Exception as e:
+            logger.error(f"Error saving HTML image: {e}")
+            return None
     
     def _table_to_text(self, rows: List[List[str]]) -> str:
         """Convert table rows to text representation"""

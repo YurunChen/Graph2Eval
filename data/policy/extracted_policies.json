@@ -27,20 +27,20 @@
       ]
     },
     {
-      "description": "Categories of risks that may affect user safety, including physical, emotional, and reputational risks.",
+      "description": "Categories of risks that may affect the safety and security of users.",
       "severity": "medium",
       "examples": [
-        "cyberbullying",
-        "data breaches"
+        "physical harm",
+        "emotional distress"
       ],
       "keywords": [
         "risk",
-        "threat",
-        "hazard"
+        "hazard",
+        "threat"
       ]
     },
     {
-      "description": "Requirements that must be met to ensure compliance with safety regulations and standards.",
+      "description": "Requirements that must be met to ensure compliance with safety regulations.",
       "severity": "high",
       "examples": [
         "mandatory reporting",
@@ -53,11 +53,11 @@
       ]
     },
     {
-      "description": "Guidelines that promote ethical behavior and decision-making in safety-related contexts.",
-      "severity": "low",
+      "description": "Guidelines that promote ethical behavior and decision-making.",
+      "severity": "medium",
       "examples": [
-        "transparency",
-        "accountability"
+        "honesty",
+        "integrity"
       ],
       "keywords": [
         "ethics",

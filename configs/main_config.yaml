@@ -42,7 +42,6 @@ includes:
 - graph_rag_config.yaml
 - task_craft_config.yaml
 - agent_config.yaml
-- evaluation_config.yaml
 - safety_config.yaml
 - datasets_config.yaml
 - finetuning_config.yaml

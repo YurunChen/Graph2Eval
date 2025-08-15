@@ -1,7 +1,29 @@
-agent_type: no_rag
-enable_evaluation: true
-enable_memory: true
-enable_multi_agent: true
+# Agent Configuration - Unified Architecture
+# 
+# agent_mode: Controls the overall agent system mode
+#   - "single": Use a single agent (no_rag or rag)
+#   - "multi_agent": Use multi-agent system
+#
+# agent_type: Controls whether retrieval is enabled
+#   - "no_rag": No retrieval capabilities (for both single and multi-agent modes)
+#   - "rag": RAG capabilities with knowledge graph retrieval
+#
+# When agent_mode is "multi":
+#   - If agent_type is "no_rag": Multi-agent system without retrieval (retriever agent disabled)
+#   - If agent_type is "rag": Multi-agent system with retrieval (retriever agent enabled)
+#
+# Common settings are shared across all agent types:
+#   - execution: LLM execution parameters
+#   - retrieval: Knowledge graph retrieval parameters  
+#   - system: Common system settings
+#   - multi_step: Multi-step execution settings
+#
+# Multi-agent specific settings are under multi_agent section
+
+agent_mode: multi  # single, multi
+agent_type: no_rag      # no_rag, rag (controls retrieval capabilities in both modes)
+
+# Common execution settings (shared by all agents)
 execution:
   max_context_length: 4000
   max_retries: 3
@@ -13,14 +35,11 @@ execution:
   retry_delay: 1.0
   temperature: 0.1
   timeout: 30
-executor_type: llm
-log_intermediate: false
-memory_size: 10
-multi_step:
-  decomposition_strategy: automatic
-  enabled: true
-  max_subtasks: 5
-  subtask_timeout: 20
+  
+  # Image processing support
+  support_images: true
+
+# Common retrieval settings (used by RAG agents)
 retrieval:
   expand_with_context: true
   include_neighbors: true
@@ -28,98 +47,96 @@ retrieval:
   max_nodes: 10
   prefer_gold_nodes: true
   similarity_threshold: 0.7
-retriever_type: hybrid
-verbose: false
 
-# Multi-agent system configuration
+# Common system settings
+system:
+  enable_evaluation: true
+  enable_memory: true
+  memory_size: 10
+  verbose: false
+  log_intermediate: false
+
+
+
+# Multi-agent system configuration (only used when agent_mode is multi)
+# Agent roles are automatically enabled/disabled based on agent_type
 multi_agent:
   # System-level configuration
-  enable_parallel_execution: false
-  enable_agent_communication: true
   max_iterations: 3
   confidence_threshold: 0.7
   verbose: true
-  log_agent_outputs: true
   
-  # LLM model configuration for each agent
-  planner_model: gpt-4o-mini
-  retriever_model: gpt-4o-mini
-  reasoner_model: gpt-4o-mini
-  verifier_model: gpt-4o-mini
-  summarizer_model: gpt-4o-mini
-  
-  # Execution configuration for each agent (optional, will override default settings)
-  planner_config:
-    execution:
+  # Agent roles and their configurations
+  # Note: retriever agent is automatically disabled when agent_type is "no_rag"
+  agents:
+    planner:
       model_name: gpt-4o-mini
       temperature: 0.1
       max_tokens: 1000
       timeout: 30
       max_retries: 3
       response_format: json
-    retrieval:
-      max_nodes: 10
-      max_hops: 3
-      similarity_threshold: 0.7
-    enable_evaluation: true
-    verbose: false
-  
-  retriever_config:
-    execution:
+      retrieval:
+        max_nodes: 10
+        max_hops: 3
+        similarity_threshold: 0.7
+      enable_evaluation: true
+      verbose: false
+    
+    retriever:
+      # This agent is automatically disabled when agent_type is "no_rag"
       model_name: gpt-4o-mini
       temperature: 0.0
       max_tokens: 500
       timeout: 30
       max_retries: 3
       response_format: json
-    retrieval:
-      max_nodes: 15
-      max_hops: 2
-      similarity_threshold: 0.8
-    enable_evaluation: true
-    verbose: false
-  
-  reasoner_config:
-    execution:
+      retrieval:
+        max_nodes: 15
+        max_hops: 2
+        similarity_threshold: 0.8
+      enable_evaluation: true
+      verbose: false
+    
+    reasoner:
       model_name: gpt-4o-mini
       temperature: 0.1
       max_tokens: 1500
       timeout: 30
       max_retries: 3
       response_format: json
-    retrieval:
-      max_nodes: 10
-      max_hops: 3
-      similarity_threshold: 0.7
-    enable_evaluation: true
-    verbose: false
-  
-  verifier_config:
-    execution:
+      retrieval:
+        max_nodes: 10
+        max_hops: 3
+        similarity_threshold: 0.7
+      enable_evaluation: true
+      verbose: false
+    
+    verifier:
       model_name: gpt-4o-mini
       temperature: 0.0
       max_tokens: 800
       timeout: 30
       max_retries: 3
       response_format: json
-    retrieval:
-      max_nodes: 8
-      max_hops: 2
-      similarity_threshold: 0.8
-    enable_evaluation: true
-    verbose: false
-  
-  summarizer_config:
-    execution:
+      retrieval:
+        max_nodes: 8
+        max_hops: 2
+        similarity_threshold: 0.8
+      enable_evaluation: true
+      verbose: false
+    
+    summarizer:
       model_name: gpt-4o-mini
       temperature: 0.1
       max_tokens: 1200
       timeout: 30
       max_retries: 3
       response_format: json
-    retrieval:
-      max_nodes: 10
-      max_hops: 2
-      similarity_threshold: 0.7
-    enable_evaluation: true
-    verbose: false
+      retrieval:
+        max_nodes: 10
+        max_hops: 2
+        similarity_threshold: 0.7
+      enable_evaluation: true
+      verbose: false
+

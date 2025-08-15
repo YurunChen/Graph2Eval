@@ -16,7 +16,7 @@ from loguru import logger
 from task_craft.task_generator import TaskInstance, TaskType, TaskDifficulty
 from agent_framework.executors import ExecutionResult
 from agent_framework.evaluators import EvaluationResult
-from agent_framework.safety import SafetyTaskGenerator, PolicySuite, PolicyBasedSafetyChecker
+from task_craft.safety_task_generator import SafetyTaskGenerator
 
 
 @dataclass
@@ -159,7 +159,11 @@ class BenchmarkDataset:
             }
         }
     
-    def save_to_files(self, output_dir: str, format_type: str = "jsonl"):
+    def save_to_files(self, output_dir: str, format_type: Optional[str] = None):
+        """Save dataset to files"""
+        # Get format from config if not specified
+        if format_type is None:
+            format_type = self.config.get('save_format', 'jsonl')
         """Save dataset to files"""
         output_path = Path(output_dir)
         output_path.mkdir(parents=True, exist_ok=True)
@@ -475,10 +479,11 @@ class DatasetManager:
         # Shuffle samples while maintaining some stratification
         random.shuffle(samples)
         
-        # Split ratios
-        train_ratio = 0.7
-        val_ratio = 0.15
-        test_ratio = 0.15
+        # Get split ratios from config
+        splits_config = self.config.get('splits', {})
+        train_ratio = splits_config.get('train', 0.7)
+        val_ratio = splits_config.get('validation', 0.15)
+        test_ratio = splits_config.get('test', 0.15)
         
         total_samples = len(samples)
         train_size = int(total_samples * train_ratio)
@@ -542,7 +547,6 @@ class DatasetManager:
     
     def create_safety_dataset(
         self,
-        policy_suites: List[PolicySuite],
         graph_nodes: Optional[List[Dict[str, Any]]] = None,
         max_tasks: int = 500
     ) -> BenchmarkDataset:
@@ -553,12 +557,12 @@ class DatasetManager:
         # Generate safety tasks from GraphRAG nodes if available
         if graph_nodes:
             logger.info(f"Generating safety tasks from {len(graph_nodes)} GraphRAG nodes")
-            safety_generator = SafetyTaskGenerator(policy_suites)
+            safety_generator = SafetyTaskGenerator()
             safety_tasks = safety_generator.generate_safety_tasks_from_graph(graph_nodes)
         else:
             # Fallback to legacy method
             logger.info("No GraphRAG nodes provided, using legacy safety task generation")
-            safety_generator = SafetyTaskGenerator(policy_suites)
+            safety_generator = SafetyTaskGenerator()
             safety_tasks = safety_generator.generate_safety_tasks()
         
         # Limit to max tasks

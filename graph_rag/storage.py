@@ -109,7 +109,8 @@ class JSONStorage(GraphStorage):
         self.edges = {}  # edge_id -> Edge
         self.node_edges = {}  # node_id -> set of edge_ids
         
-        if file_path and Path(file_path).exists():
+        # Only auto-load if file_path is a file (not a directory)
+        if file_path and Path(file_path).exists() and Path(file_path).is_file():
             self.load(file_path)
     
     def add_node(self, node: Node):

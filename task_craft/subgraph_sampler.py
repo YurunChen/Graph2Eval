@@ -28,7 +28,7 @@ class SamplingConfig:
     
     @classmethod
     def from_config(cls):
-        """从配置文件创建采样配置"""
+        """Create sampling configuration from configuration file"""
         config = get_config()
         sampling_config = config.task_craft.get('subgraph_sampling', {})
         global_config = config.global_config

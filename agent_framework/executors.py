@@ -24,7 +24,8 @@ except ImportError:
     ANTHROPIC_AVAILABLE = False
 
 from task_craft.task_generator import TaskInstance
-from .retrievers import RetrievalResult
+# Import RetrievalResult only when needed to avoid circular import
+# from .retrievers import RetrievalResult
 from config_manager import get_config
 
 
@@ -50,6 +51,9 @@ class ExecutionConfig:
     # Context settings
     max_context_length: int = 4000
     
+    # Image processing support
+    support_images: bool = True
+    
     @classmethod
     def from_config(cls):
         """从配置文件创建执行配置"""
@@ -66,7 +70,8 @@ class ExecutionConfig:
             require_citations=execution_config.get('require_citations', True),
             require_reasoning=execution_config.get('require_reasoning', False),
             response_format=execution_config.get('response_format', "structured"),
-            max_context_length=execution_config.get('max_context_length', 4000)
+            max_context_length=execution_config.get('max_context_length', 4000),
+            support_images=execution_config.get('support_images', True)
         )
 
 
@@ -117,7 +122,7 @@ class TaskExecutor(ABC):
     """Abstract base class for task executors"""
     
     @abstractmethod
-    def execute(self, task: TaskInstance, context: RetrievalResult) -> ExecutionResult:
+    def execute(self, task: TaskInstance, context: 'RetrievalResult') -> ExecutionResult:
         """Execute a task with given context"""
         pass
 
@@ -203,13 +208,17 @@ class LLMExecutor(TaskExecutor):
             logger.error("   - Verify network connectivity")
             raise RuntimeError("LLM client not available. Cannot execute tasks without a valid API configuration.")
     
-    def execute(self, task: TaskInstance, context: RetrievalResult) -> ExecutionResult:
+    def execute(self, task: TaskInstance, context: 'RetrievalResult') -> ExecutionResult:
         """Execute task using LLM"""
         logger.debug(f"Executing task {task.task_id} with {len(context.nodes)} context nodes")
         
         start_time = time.time()
         
         try:
+            # Check if this is an image task
+            if task.images and self.config.support_images:
+                return self._execute_image_task(task, context, start_time)
+            
             # Build prompt
             prompt = self._build_prompt(task, context)
             
@@ -229,6 +238,41 @@ class LLMExecutor(TaskExecutor):
             
         except Exception as e:
             logger.error(f"Task {task.task_id} failed: {e}")
+            
+            return ExecutionResult(
+                task_id=task.task_id,
+                success=False,
+                answer="",
+                error_type=type(e).__name__,
+                error_message=str(e),
+                execution_time=time.time() - start_time,
+                model_used=self.config.model_name
+            )
+    
+    def _execute_image_task(self, task: TaskInstance, context: 'RetrievalResult', start_time: float) -> ExecutionResult:
+        """Execute image-based task using the configured model"""
+        logger.debug(f"Executing image task {task.task_id} with {len(task.images)} images")
+        
+        try:
+            # Build prompt
+            prompt = self._build_prompt(task, context)
+            
+            # Execute with retries (with image support)
+            response, tokens_used = self._execute_with_retries_with_images(prompt, task.images)
+            
+            # Parse response
+            result = self._parse_response(task, response)
+            
+            # Add execution metadata
+            result.execution_time = time.time() - start_time
+            result.model_used = self.config.model_name
+            result.tokens_used = tokens_used
+            
+            logger.debug(f"Image task {task.task_id} completed successfully")
+            return result
+            
+        except Exception as e:
+            logger.error(f"Image task {task.task_id} failed: {e}")
             
             return ExecutionResult(
                 task_id=task.task_id,
@@ -343,8 +387,12 @@ class LLMExecutor(TaskExecutor):
         
         return "\n\n".join(prompt_parts)
     
-    def _build_prompt(self, task: TaskInstance, context: RetrievalResult) -> str:
+    def _build_prompt(self, task: TaskInstance, context: 'RetrievalResult') -> str:
         """Build prompt for LLM execution"""
+        
+        # Check if this is an image task
+        if task.images and self.config.support_images:
+            return self._build_image_prompt(task, context)
         
         # Get context text
         context_text = context.get_context_text(self.config.max_context_length)
@@ -361,10 +409,64 @@ class LLMExecutor(TaskExecutor):
         
         # Task-specific instructions
         if task.requires_citations:
-            prompt_parts.append("IMPORTANT: Cite your sources using the node IDs from the context above.")
+            # Get available node IDs for citation
+            available_nodes = [node.node_id for node in context.nodes] if context and context.nodes else []
+            if available_nodes:
+                prompt_parts.append(f"IMPORTANT: You MUST cite your sources using the node IDs from the context above.")
+                prompt_parts.append(f"Available node IDs for citation: {', '.join(available_nodes[:10])}{'...' if len(available_nodes) > 10 else ''}")
+                prompt_parts.append("When you reference information from the context, include the relevant node ID(s) in your citations.")
+            else:
+                prompt_parts.append("IMPORTANT: Cite your sources using the node IDs from the context above.")
         
         if task.requires_reasoning_path:
             prompt_parts.append("IMPORTANT: Show your reasoning process step by step.")
+        
+        # Task prompt
+        prompt_parts.append(f"\nTask: {task.prompt}")
+        
+        # Output format instructions
+        output_instructions = self._get_output_format_instructions(task)
+        if output_instructions:
+            prompt_parts.append(f"\nOutput Format:\n{output_instructions}")
+        
+        return "\n\n".join(prompt_parts)
+    
+    def _build_image_prompt(self, task: TaskInstance, context: 'RetrievalResult') -> str:
+        """Build prompt for image-based tasks"""
+        
+        # Get context text
+        context_text = context.get_context_text(self.config.max_context_length)
+        
+        # Build structured prompt
+        prompt_parts = []
+        
+        # System instruction for image tasks
+        prompt_parts.append("You are an expert assistant that analyzes images and answers questions based on provided context and visual information.")
+        
+        # Context
+        if context_text:
+            prompt_parts.append(f"\nContext Information:\n{context_text}")
+        
+        # Image information
+        if task.images:
+            prompt_parts.append(f"\nImages to analyze: {len(task.images)} image(s)")
+            for i, image_path in enumerate(task.images):
+                prompt_parts.append(f"Image {i+1}: {image_path}")
+        
+        if task.image_descriptions:
+            prompt_parts.append(f"\nImage descriptions:")
+            for i, desc in enumerate(task.image_descriptions):
+                prompt_parts.append(f"Image {i+1}: {desc}")
+        
+        # Task-specific instructions
+        if task.requires_citations:
+            available_nodes = [node.node_id for node in context.nodes] if context and context.nodes else []
+            if available_nodes:
+                prompt_parts.append(f"IMPORTANT: You MUST cite your sources using the node IDs from the context above.")
+                prompt_parts.append(f"Available node IDs for citation: {', '.join(available_nodes[:10])}{'...' if len(available_nodes) > 10 else ''}")
+        
+        if task.requires_reasoning_path:
+            prompt_parts.append("IMPORTANT: Show your reasoning process step by step, including visual analysis.")
         
         # Task prompt
         prompt_parts.append(f"\nTask: {task.prompt}")
@@ -471,6 +573,55 @@ class LLMExecutor(TaskExecutor):
                     time.sleep(wait_time)
                 else:
                     logger.error(f"All {self.config.max_retries + 1} LLM call attempts failed")
+        
+        # If all retries failed, try to provide a fallback response
+        logger.warning("Using fallback response due to API failures")
+        try:
+            fallback_response = self._generate_mock_response(prompt)
+            return fallback_response, 0
+        except Exception as fallback_error:
+            logger.error(f"Fallback response generation also failed: {fallback_error}")
+            raise last_exception
+    
+    def _execute_with_retries_with_images(self, prompt: str, image_paths: List[str]) -> tuple[str, int]:
+        """Execute LLM call with images and retry logic"""
+        
+        if self.client is None:
+            raise RuntimeError("LLM client not available. Cannot execute tasks without a valid API configuration.")
+        
+        last_exception = None
+        
+        for attempt in range(self.config.max_retries + 1):
+            try:
+                logger.debug(f"LLM call with images attempt {attempt + 1}/{self.config.max_retries + 1}")
+                
+                # Use the same model as configured, just with image support
+                if "gpt" in self.config.model_name.lower():
+                    response, tokens_used = self._call_openai_with_images(prompt, image_paths)
+                elif "claude" in self.config.model_name.lower():
+                    response, tokens_used = self._call_anthropic_with_images(prompt, image_paths)
+                else:
+                    # For unsupported models, fall back to text-only
+                    logger.warning(f"Model {self.config.model_name} doesn't support images, falling back to text-only")
+                    response, tokens_used = self._call_openai(prompt) if "gpt" in self.config.model_name.lower() else self._call_anthropic(prompt)
+                
+                # Validate response
+                if not response or not response.strip():
+                    raise RuntimeError("Empty response received from LLM")
+                
+                logger.debug(f"LLM call with images successful on attempt {attempt + 1}")
+                return response, tokens_used
+                
+            except Exception as e:
+                last_exception = e
+                logger.warning(f"LLM call with images attempt {attempt + 1} failed: {e}")
+                
+                if attempt < self.config.max_retries:
+                    wait_time = self.config.retry_delay * (2 ** attempt)  # Exponential backoff
+                    logger.info(f"Retrying in {wait_time} seconds...")
+                    time.sleep(wait_time)
+                else:
+                    logger.error(f"All {self.config.max_retries + 1} LLM call with images attempts failed")
         
         # If all retries failed, try to provide a fallback response
         logger.warning("Using fallback response due to API failures")
@@ -773,6 +924,8 @@ class LLMExecutor(TaskExecutor):
             r'node[_\s]+(\w+)',  # node_id or node id
             r'para[_\s]+(\w+)',  # para_id
             r'table[_\s]+(\w+)', # table_id
+            r'"([^"]*node[^"]*)"',  # quoted node references
+            r"'([^']*node[^']*)'",  # single-quoted node references
         ]
         
         for pattern in patterns:
@@ -785,6 +938,23 @@ class LLMExecutor(TaskExecutor):
             citation = citation.strip()
             if citation and citation not in cleaned_citations:
                 cleaned_citations.append(citation)
+        
+        # If no citations found, try to extract from JSON-like structures
+        if not cleaned_citations:
+            # Look for citations in JSON arrays
+            json_citation_patterns = [
+                r'"citations"\s*:\s*\[([^\]]+)\]',
+                r'"citations"\s*:\s*\["([^"]+)"(?:,\s*"([^"]+)")*\]',
+            ]
+            
+            for pattern in json_citation_patterns:
+                matches = re.findall(pattern, response, re.IGNORECASE)
+                if matches:
+                    for match in matches:
+                        if isinstance(match, tuple):
+                            cleaned_citations.extend([m.strip() for m in match if m.strip()])
+                        else:
+                            cleaned_citations.append(match.strip())
         
         return cleaned_citations[:5]  # Limit to reasonable number
 
@@ -852,7 +1022,7 @@ class MultiStepExecutor(TaskExecutor):
         self.config = config or ExecutionConfig()
         self.base_executor = LLMExecutor(config)
     
-    def execute(self, task: TaskInstance, context: RetrievalResult) -> ExecutionResult:
+    def execute(self, task: TaskInstance, context: 'RetrievalResult') -> ExecutionResult:
         """Execute multi-step task"""
         
         if task.task_type.value not in ["reasoning", "aggregation", "synthesis"]:
@@ -974,3 +1144,103 @@ class MultiStepExecutor(TaskExecutor):
         final_result.retries_needed = sum(r.retries_needed for r in subtask_results)
         
         return final_result
+    
+    def _call_openai_with_images(self, prompt: str, image_paths: List[str]) -> tuple[str, int]:
+        """Call OpenAI API with images"""
+        try:
+            from pathlib import Path
+            import base64
+            
+            # Prepare messages with images
+            messages = []
+            
+            # Add system message if needed
+            messages.append({"role": "user", "content": []})
+            
+            # Add text content
+            messages[0]["content"].append({"type": "text", "text": prompt})
+            
+            # Add images
+            for image_path in image_paths:
+                if Path(image_path).exists():
+                    with open(image_path, "rb") as image_file:
+                        image_data = base64.b64encode(image_file.read()).decode('utf-8')
+                        messages[0]["content"].append({
+                            "type": "image_url",
+                            "image_url": {
+                                "url": f"data:image/jpeg;base64,{image_data}"
+                            }
+                        })
+                else:
+                    logger.warning(f"Image file not found: {image_path}")
+            
+            response = self.client.chat.completions.create(
+                model=self.config.model_name,
+                messages=messages,
+                temperature=self.config.temperature,
+                max_tokens=self.config.max_tokens,
+                timeout=self.config.timeout
+            )
+            
+            # Extract token usage
+            tokens_used = response.usage.total_tokens if hasattr(response, 'usage') and response.usage else 0
+            
+            # Validate response
+            if not response.choices or not response.choices[0].message.content:
+                logger.error("OpenAI API returned empty response")
+                raise RuntimeError("Empty response from OpenAI API")
+            
+            return response.choices[0].message.content, tokens_used
+            
+        except Exception as e:
+            logger.error(f"OpenAI API call with images failed: {e}")
+            raise e
+    
+    def _call_anthropic_with_images(self, prompt: str, image_paths: List[str]) -> tuple[str, int]:
+        """Call Anthropic API with images"""
+        try:
+            from pathlib import Path
+            import base64
+            
+            # Prepare messages with images
+            messages = []
+            
+            # Add text content
+            content = [{"type": "text", "text": prompt}]
+            
+            # Add images
+            for image_path in image_paths:
+                if Path(image_path).exists():
+                    with open(image_path, "rb") as image_file:
+                        image_data = base64.b64encode(image_file.read()).decode('utf-8')
+                        content.append({
+                            "type": "image",
+                            "source": {
+                                "type": "base64",
+                                "media_type": "image/jpeg",
+                                "data": image_data
+                            }
+                        })
+                else:
+                    logger.warning(f"Image file not found: {image_path}")
+            
+            response = self.client.messages.create(
+                model=self.config.model_name,
+                max_tokens=self.config.max_tokens,
+                temperature=self.config.temperature,
+                messages=[{"role": "user", "content": content}]
+            )
+            
+            # Extract token usage
+            tokens_used = response.usage.input_tokens + response.usage.output_tokens if hasattr(response, 'usage') and response.usage else 0
+            
+            # Validate response
+            if not response.content or not response.content[0].text:
+                logger.error("Anthropic API returned empty response")
+                raise RuntimeError("Empty response from Anthropic API")
+            
+            return response.content[0].text, tokens_used
+            
+        except Exception as e:
+            logger.error(f"Anthropic API call with images failed: {e}")
+            raise e

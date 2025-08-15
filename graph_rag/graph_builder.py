@@ -139,7 +139,12 @@ class DocumentGraph:
     
     def save(self, path: str, vector_save_path: str = None):
         """Save graph to storage"""
-        self.storage.save(f"{path}_graph.json")
+        # Use the path as directory and save with specific filename
+        from pathlib import Path
+        graph_dir = Path(path)
+        graph_dir.mkdir(parents=True, exist_ok=True)
+        graph_file = graph_dir / "knowledge_graph.json"
+        self.storage.save(str(graph_file))
         
         # Use provided vector path or fallback to same directory as graph
         if vector_save_path:
@@ -153,7 +158,19 @@ class DocumentGraph:
     
     def load(self, graph_path: str, vector_path: str):
         """Load graph from storage"""
-        self.storage.load(graph_path)
+        # Handle graph_path as directory - look for knowledge_graph.json inside
+        from pathlib import Path
+        graph_dir = Path(graph_path)
+        if graph_dir.is_dir():
+            graph_file = graph_dir / "knowledge_graph.json"
+            if graph_file.exists():
+                self.storage.load(str(graph_file))
+            else:
+                raise FileNotFoundError(f"Graph file not found: {graph_file}")
+        else:
+            # Assume it's a direct file path
+            self.storage.load(graph_path)
+        
         self.vector_index.load(vector_path)
 
 
