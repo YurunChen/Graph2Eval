@@ -20,8 +20,11 @@
 #
 # Multi-agent specific settings are under multi_agent section
 
-agent_mode: multi  # single, multi
-agent_type: no_rag      # no_rag, rag (controls retrieval capabilities in both modes)
+# Agent configuration options
+agent_mode: single      # Available modes: [single, multi, web]
+agent_type: rag      # Type options: [no_rag, rag] 
+                        # Note: Controls retrieval capabilities in all modes
+                        # Web agent does not support this functionality
 
 # Common execution settings (shared by all agents)
 execution:
@@ -139,4 +142,23 @@ multi_agent:
         similarity_threshold: 0.7
       enable_evaluation: true
       verbose: false
+
+
+# Web Agent configuration (used when agent_mode is "web")
+web_agent:
+  # Browser Automation Configuration
+  use_browser: true  # Enable real browser automation
+  headless: true     # Run browser in headless mode
+  timeout: 30        # Page load timeout
+  wait_time: 1.0     # Wait time between actions
+  
+  # Web Evaluator Configuration
+  evaluator:
+    navigation_weight: 0.3
+    interaction_weight: 0.3
+    data_extraction_weight: 0.2
+    behavior_similarity_weight: 0.2
+    success_threshold: 0.7
+  
+
 

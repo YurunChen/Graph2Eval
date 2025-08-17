@@ -20,6 +20,13 @@ class EdgeType(Enum):
     CROSS_DOC = "cross_doc"  # cross-document relationships
     TABLE_CONTEXT = "table_context"  # table-paragraph relationships
     FIGURE_CONTEXT = "figure_context"  # figure-text relationships
+    # Web-specific edge types
+    WEB_NAVIGATION = "web_navigation"  # page navigation
+    WEB_INTERACTION = "web_interaction"  # user interaction
+    WEB_FORM_SUBMIT = "web_form_submit"  # form submission
+    WEB_CLICK_TRIGGER = "web_click_trigger"  # click triggers action
+    WEB_DATA_FLOW = "web_data_flow"  # data flow between elements
+    WEB_LAYOUT = "web_layout"  # spatial layout relationships
 
 
 @dataclass
@@ -446,3 +453,180 @@ COMMON_MOTIFS = [
         complexity_score=1.8
     )
 ]
+
+
+@dataclass
+class WebNavigationEdge(Edge):
+    """Edge representing web page navigation"""
+    navigation_type: str = "link"  # link, form_submit, button_click
+    target_url: str = ""
+    navigation_method: str = "GET"  # GET, POST, etc.
+    
+    def __post_init__(self):
+        if self.edge_type != EdgeType.WEB_NAVIGATION:
+            self.edge_type = EdgeType.WEB_NAVIGATION
+    
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> 'WebNavigationEdge':
+        return cls(
+            edge_id=data["edge_id"],
+            edge_type=EdgeType.WEB_NAVIGATION,
+            source_node_id=data["source_node_id"],
+            target_node_id=data["target_node_id"],
+            weight=data.get("weight", 1.0),
+            metadata=data.get("metadata", {}),
+            bidirectional=data.get("bidirectional", False),
+            navigation_type=data.get("navigation_type", "link"),
+            target_url=data.get("target_url", ""),
+            navigation_method=data.get("navigation_method", "GET")
+        )
+
+
+@dataclass
+class WebInteractionEdge(Edge):
+    """Edge representing user interaction with web elements"""
+    interaction_type: str = "click"  # click, input, hover, etc.
+    interaction_data: Dict[str, Any] = field(default_factory=dict)
+    interaction_result: str = ""  # success, failure, redirect, etc.
+    
+    def __post_init__(self):
+        if self.edge_type != EdgeType.WEB_INTERACTION:
+            self.edge_type = EdgeType.WEB_INTERACTION
+    
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> 'WebInteractionEdge':
+        return cls(
+            edge_id=data["edge_id"],
+            edge_type=EdgeType.WEB_INTERACTION,
+            source_node_id=data["source_node_id"],
+            target_node_id=data["target_node_id"],
+            weight=data.get("weight", 1.0),
+            metadata=data.get("metadata", {}),
+            bidirectional=data.get("bidirectional", False),
+            interaction_type=data.get("interaction_type", "click"),
+            interaction_data=data.get("interaction_data", {}),
+            interaction_result=data.get("interaction_result", "")
+        )
+
+
+@dataclass
+class WebFormSubmitEdge(Edge):
+    """Edge representing form submission"""
+    form_data: Dict[str, Any] = field(default_factory=dict)
+    submit_method: str = "POST"
+    validation_result: str = "success"  # success, validation_error, etc.
+    
+    def __post_init__(self):
+        if self.edge_type != EdgeType.WEB_FORM_SUBMIT:
+            self.edge_type = EdgeType.WEB_FORM_SUBMIT
+    
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> 'WebFormSubmitEdge':
+        return cls(
+            edge_id=data["edge_id"],
+            edge_type=EdgeType.WEB_FORM_SUBMIT,
+            source_node_id=data["source_node_id"],
+            target_node_id=data["target_node_id"],
+            weight=data.get("weight", 1.0),
+            metadata=data.get("metadata", {}),
+            bidirectional=data.get("bidirectional", False),
+            form_data=data.get("form_data", {}),
+            submit_method=data.get("submit_method", "POST"),
+            validation_result=data.get("validation_result", "success")
+        )
+
+
+@dataclass
+class WebClickTriggerEdge(Edge):
+    """Edge representing click-triggered actions"""
+    trigger_action: str = ""  # show_modal, hide_element, update_content, etc.
+    trigger_condition: str = ""  # always, on_valid_input, etc.
+    
+    def __post_init__(self):
+        if self.edge_type != EdgeType.WEB_CLICK_TRIGGER:
+            self.edge_type = EdgeType.WEB_CLICK_TRIGGER
+    
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> 'WebClickTriggerEdge':
+        return cls(
+            edge_id=data["edge_id"],
+            edge_type=EdgeType.WEB_CLICK_TRIGGER,
+            source_node_id=data["source_node_id"],
+            target_node_id=data["target_node_id"],
+            weight=data.get("weight", 1.0),
+            metadata=data.get("metadata", {}),
+            bidirectional=data.get("bidirectional", False),
+            trigger_action=data.get("trigger_action", ""),
+            trigger_condition=data.get("trigger_condition", "")
+        )
+
+
+@dataclass
+class WebDataFlowEdge(Edge):
+    """Edge representing data flow between elements"""
+    data_type: str = ""  # text, number, selection, etc.
+    data_transformation: str = ""  # copy, validate, format, etc.
+    data_validation: Dict[str, Any] = field(default_factory=dict)
+    
+    def __post_init__(self):
+        if self.edge_type != EdgeType.WEB_DATA_FLOW:
+            self.edge_type = EdgeType.WEB_DATA_FLOW
+    
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> 'WebDataFlowEdge':
+        return cls(
+            edge_id=data["edge_id"],
+            edge_type=EdgeType.WEB_DATA_FLOW,
+            source_node_id=data["source_node_id"],
+            target_node_id=data["target_node_id"],
+            weight=data.get("weight", 1.0),
+            metadata=data.get("metadata", {}),
+            bidirectional=data.get("bidirectional", False),
+            data_type=data.get("data_type", ""),
+            data_transformation=data.get("data_transformation", ""),
+            data_validation=data.get("data_validation", {})
+        )
+
+
+@dataclass
+class WebLayoutEdge(Edge):
+    """Edge representing spatial layout relationships"""
+    layout_type: str = ""  # above, below, left, right, inside, etc.
+    distance: float = 0.0  # spatial distance
+    alignment: str = ""  # horizontal, vertical, diagonal
+    
+    def __post_init__(self):
+        if self.edge_type != EdgeType.WEB_LAYOUT:
+            self.edge_type = EdgeType.WEB_LAYOUT
+    
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> 'WebLayoutEdge':
+        return cls(
+            edge_id=data["edge_id"],
+            edge_type=EdgeType.WEB_LAYOUT,
+            source_node_id=data["source_node_id"],
+            target_node_id=data["target_node_id"],
+            weight=data.get("weight", 1.0),
+            metadata=data.get("metadata", {}),
+            bidirectional=data.get("bidirectional", False),
+            layout_type=data.get("layout_type", ""),
+            distance=data.get("distance", 0.0),
+            alignment=data.get("alignment", "")
+        )
+
+
+def create_web_edge(edge_type: EdgeType, **kwargs) -> Edge:
+    """Factory function to create web edges"""
+    edge_classes = {
+        EdgeType.WEB_NAVIGATION: WebNavigationEdge,
+        EdgeType.WEB_INTERACTION: WebInteractionEdge,
+        EdgeType.WEB_FORM_SUBMIT: WebFormSubmitEdge,
+        EdgeType.WEB_CLICK_TRIGGER: WebClickTriggerEdge,
+        EdgeType.WEB_DATA_FLOW: WebDataFlowEdge,
+        EdgeType.WEB_LAYOUT: WebLayoutEdge,
+    }
+    
+    if edge_type not in edge_classes:
+        raise ValueError(f"Unknown web edge type: {edge_type}")
+    
+    return edge_classes[edge_type](**kwargs)

@@ -321,6 +321,50 @@ class LLMExecutor(TaskExecutor):
                 model_used=self.config.model_name
             )
     
+    def execute_simple_with_image(self, prompt: str, image_paths: List[str], task_id: str = "simple_task") -> ExecutionResult:
+        """Execute simple prompt with image input"""
+        logger.debug(f"Executing simple task with image {task_id}")
+        
+        start_time = time.time()
+        
+        try:
+            # Execute with image support
+            if self.config.model_name.startswith("gpt-4"):
+                response, tokens_used = self._call_openai_with_images(prompt, image_paths)
+            elif self.config.model_name.startswith("claude"):
+                response, tokens_used = self._call_anthropic_with_images(prompt, image_paths)
+            else:
+                # Fallback to text-only for unsupported models
+                logger.warning(f"Model {self.config.model_name} doesn't support images, falling back to text-only")
+                response, tokens_used = self._execute_with_retries(prompt)
+            
+            # Create simple result
+            result = ExecutionResult(
+                task_id=task_id,
+                success=True,
+                answer=response,
+                execution_time=time.time() - start_time,
+                model_used=self.config.model_name,
+                tokens_used=tokens_used,
+                raw_response=response
+            )
+            
+            logger.debug(f"Simple task with image {task_id} completed successfully")
+            return result
+            
+        except Exception as e:
+            logger.error(f"Simple task with image {task_id} failed: {e}")
+            
+            return ExecutionResult(
+                task_id=task_id,
+                success=False,
+                answer="",
+                error_type=type(e).__name__,
+                error_message=str(e),
+                execution_time=time.time() - start_time,
+                model_used=self.config.model_name
+            )
+    
     def execute_task_only(self, task: TaskInstance) -> ExecutionResult:
         """Execute task without RetrievalResult context"""
         logger.debug(f"Executing task-only {task.task_id}")
@@ -582,6 +626,8 @@ class LLMExecutor(TaskExecutor):
         except Exception as fallback_error:
             logger.error(f"Fallback response generation also failed: {fallback_error}")
             raise last_exception
+    
+
     
     def _execute_with_retries_with_images(self, prompt: str, image_paths: List[str]) -> tuple[str, int]:
         """Execute LLM call with images and retry logic"""
@@ -1014,6 +1060,106 @@ class LLMExecutor(TaskExecutor):
             logger.warning(f"Failed to extract content from malformed JSON: {e}")
             return "Content extraction failed"
 
+    def _call_openai_with_images(self, prompt: str, image_paths: List[str]) -> tuple[str, int]:
+        """Call OpenAI API with images"""
+        try:
+            from pathlib import Path
+            import base64
+            
+            # Prepare messages with images
+            messages = []
+            
+            # Add system message if needed
+            messages.append({"role": "user", "content": []})
+            
+            # Add text content
+            messages[0]["content"].append({"type": "text", "text": prompt})
+            
+            # Add images
+            for image_path in image_paths:
+                if Path(image_path).exists():
+                    with open(image_path, "rb") as image_file:
+                        image_data = base64.b64encode(image_file.read()).decode('utf-8')
+                        messages[0]["content"].append({
+                            "type": "image_url",
+                            "image_url": {
+                                "url": f"data:image/jpeg;base64,{image_data}"
+                            }
+                        })
+                else:
+                    logger.warning(f"Image file not found: {image_path}")
+            
+            response = self.client.chat.completions.create(
+                model=self.config.model_name,
+                messages=messages,
+                temperature=self.config.temperature,
+                max_tokens=self.config.max_tokens,
+                timeout=self.config.timeout
+            )
+            
+            # Extract token usage
+            tokens_used = response.usage.total_tokens if hasattr(response, 'usage') and response.usage else 0
+            
+            # Validate response
+            if not response.choices or not response.choices[0].message.content:
+                logger.error("OpenAI API returned empty response")
+                raise RuntimeError("Empty response from OpenAI API")
+            
+            return response.choices[0].message.content, tokens_used
+            
+        except Exception as e:
+            logger.error(f"OpenAI API call with images failed: {e}")
+            raise e
+    
+    def _call_anthropic_with_images(self, prompt: str, image_paths: List[str]) -> tuple[str, int]:
+        """Call Anthropic API with images"""
+        try:
+            from pathlib import Path
+            import base64
+            
+            # Prepare messages with images
+            messages = []
+            
+            # Add text content
+            content = [{"type": "text", "text": prompt}]
+            
+            # Add images
+            for image_path in image_paths:
+                if Path(image_path).exists():
+                    with open(image_path, "rb") as image_file:
+                        image_data = base64.b64encode(image_file.read()).decode('utf-8')
+                        content.append({
+                            "type": "image",
+                            "source": {
+                                "type": "base64",
+                                "media_type": "image/jpeg",
+                                "data": image_data
+                            }
+                        })
+                else:
+                    logger.warning(f"Image file not found: {image_path}")
+            
+            response = self.client.messages.create(
+                model=self.config.model_name,
+                max_tokens=self.config.max_tokens,
+                temperature=self.config.temperature,
+                messages=[{"role": "user", "content": content}]
+            )
+            
+            # Extract token usage
+            tokens_used = response.usage.input_tokens + response.usage.output_tokens if hasattr(response, 'usage') and response.usage else 0
+            
+            # Validate response
+            if not response.content or not response.content[0].text:
+                logger.error("Anthropic API returned empty response")
+                raise RuntimeError("Empty response from Anthropic API")
+            
+            return response.content[0].text, tokens_used
+            
+        except Exception as e:
+            logger.error(f"Anthropic API call with images failed: {e}")
+            raise e
+
 
 class MultiStepExecutor(TaskExecutor):
     """Executor for complex multi-step tasks"""
@@ -1145,102 +1291,4 @@ class MultiStepExecutor(TaskExecutor):
         
         return final_result
     
-    def _call_openai_with_images(self, prompt: str, image_paths: List[str]) -> tuple[str, int]:
-        """Call OpenAI API with images"""
-        try:
-            from pathlib import Path
-            import base64
-            
-            # Prepare messages with images
-            messages = []
-            
-            # Add system message if needed
-            messages.append({"role": "user", "content": []})
-            
-            # Add text content
-            messages[0]["content"].append({"type": "text", "text": prompt})
-            
-            # Add images
-            for image_path in image_paths:
-                if Path(image_path).exists():
-                    with open(image_path, "rb") as image_file:
-                        image_data = base64.b64encode(image_file.read()).decode('utf-8')
-                        messages[0]["content"].append({
-                            "type": "image_url",
-                            "image_url": {
-                                "url": f"data:image/jpeg;base64,{image_data}"
-                            }
-                        })
-                else:
-                    logger.warning(f"Image file not found: {image_path}")
-            
-            response = self.client.chat.completions.create(
-                model=self.config.model_name,
-                messages=messages,
-                temperature=self.config.temperature,
-                max_tokens=self.config.max_tokens,
-                timeout=self.config.timeout
-            )
-            
-            # Extract token usage
-            tokens_used = response.usage.total_tokens if hasattr(response, 'usage') and response.usage else 0
-            
-            # Validate response
-            if not response.choices or not response.choices[0].message.content:
-                logger.error("OpenAI API returned empty response")
-                raise RuntimeError("Empty response from OpenAI API")
-            
-            return response.choices[0].message.content, tokens_used
-            
-        except Exception as e:
-            logger.error(f"OpenAI API call with images failed: {e}")
-            raise e
-    
-    def _call_anthropic_with_images(self, prompt: str, image_paths: List[str]) -> tuple[str, int]:
-        """Call Anthropic API with images"""
-        try:
-            from pathlib import Path
-            import base64
-            
-            # Prepare messages with images
-            messages = []
-            
-            # Add text content
-            content = [{"type": "text", "text": prompt}]
-            
-            # Add images
-            for image_path in image_paths:
-                if Path(image_path).exists():
-                    with open(image_path, "rb") as image_file:
-                        image_data = base64.b64encode(image_file.read()).decode('utf-8')
-                        content.append({
-                            "type": "image",
-                            "source": {
-                                "type": "base64",
-                                "media_type": "image/jpeg",
-                                "data": image_data
-                            }
-                        })
-                else:
-                    logger.warning(f"Image file not found: {image_path}")
-            
-            response = self.client.messages.create(
-                model=self.config.model_name,
-                max_tokens=self.config.max_tokens,
-                temperature=self.config.temperature,
-                messages=[{"role": "user", "content": content}]
-            )
-            
-            # Extract token usage
-            tokens_used = response.usage.input_tokens + response.usage.output_tokens if hasattr(response, 'usage') and response.usage else 0
-            
-            # Validate response
-            if not response.content or not response.content[0].text:
-                logger.error("Anthropic API returned empty response")
-                raise RuntimeError("Empty response from Anthropic API")
-            
-            return response.content[0].text, tokens_used
-            
-        except Exception as e:
-            logger.error(f"Anthropic API call with images failed: {e}")
-            raise e
+

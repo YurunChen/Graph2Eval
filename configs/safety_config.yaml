@@ -49,5 +49,47 @@ safety_policy:
 # Safety task generation
 safety_task_generation:
   enabled: true
-  max_tasks_per_threat: 2  # Tasks per threat
-  max_total_safety_tasks: 20  # Total safety tasks limit
+  max_tasks_per_threat: 1  # Tasks per threat
+  max_total_safety_tasks: 6  # Total safety tasks limit
+  
+  # Web safety task generation configuration
+  web_safety_tasks:
+    enabled: true
+    max_web_safety_tasks: 10  # Maximum web safety tasks to generate
+    max_tasks_per_web_task: 5  # Maximum safety tasks per web task
+    
+    # Web safety strategies to use
+    safety_strategies:
+      - "malicious_input"
+      - "phishing_detection" 
+      - "data_privacy"
+      - "access_control"
+      - "content_moderation"
+      - "form_validation"
+      - "navigation_safety"
+    
+    # Quality assessment configuration
+    quality_assessment:
+      enabled: true
+      quality_threshold: 0.7  # Minimum quality score to pass
+      assessment_criteria:
+        - "clarity_score"
+        - "relevance_score"
+        - "difficulty_score"
+        - "completeness_score"
+    
+    # Task difficulty distribution
+    difficulty_distribution:
+      easy: 0.2
+      medium: 0.6
+      hard: 0.2
+    
+    # Task type distribution (optional - if not specified, all strategies are used equally)
+    strategy_distribution:
+      malicious_input: 0.15
+      phishing_detection: 0.15
+      data_privacy: 0.15
+      access_control: 0.15
+      content_moderation: 0.15
+      form_validation: 0.15
+      navigation_safety: 0.10

@@ -209,6 +209,8 @@ install_complete_dependencies() {
         "PyPDF2>=3.0.0"
         "pdfplumber>=0.11.0"
         "python-docx>=0.8.11"
+        "playwright>=1.40.0"
+        "selenium>=4.15.0"
     )
     
     print_info "Installing AI/ML packages..."
@@ -220,6 +222,32 @@ install_complete_dependencies() {
             print_warning "$package installation failed, skipping"
         fi
     done
+    
+    return 0
+}
+
+# Install browser automation tools
+install_browser_automation() {
+    print_step "Installing browser automation tools"
+    
+    print_info "Installing Playwright browsers..."
+    if conda run -n "$ENV_NAME" playwright install >/dev/null 2>&1; then
+        print_success "Playwright browsers installed successfully"
+    else
+        print_warning "Playwright browser installation failed, will use Selenium fallback"
+    fi
+    
+    print_info "Checking Chrome/Chromium availability for Selenium..."
+    if check_command google-chrome; then
+        print_success "Google Chrome found"
+    elif check_command chromium; then
+        print_success "Chromium found"
+    elif check_command chromium-browser; then
+        print_success "Chromium browser found"
+    else
+        print_warning "No Chrome/Chromium found, Selenium may not work properly"
+        print_info "Consider installing Chrome or Chromium for full browser automation support"
+    fi
     
     return 0
 }
@@ -387,6 +415,7 @@ main() {
         "install_conda_packages:Installing conda packages"
         "install_pip_packages:Installing pip packages"
         "install_complete_dependencies:Installing complete AI/ML dependencies"
+        "install_browser_automation:Installing browser automation tools"
         "setup_nlp_models:Setting up NLP models"
         "setup_env_file:Setting up environment variables"
     )

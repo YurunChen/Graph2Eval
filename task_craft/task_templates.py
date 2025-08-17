@@ -35,22 +35,47 @@ class TaskType(Enum):
     # Safety and compliance tasks
     FACT_VERIFICATION = "fact_verification"  # Verify factual claims
     
+    # Web task types
+    SEARCH = "Search"  # Search functionality, filtering
+    FORM_FILLING = "Form Filling"  # Complete forms, login, registration
+    NAVIGATION = "Navigation"  # Multi-page navigation, link following
+    DATA_EXTRACTION = "Data Extraction"  # Extract information from pages
+    E_COMMERCE = "E-commerce"  # Product browsing, shopping cart
+    CONTENT_BROWSING = "Content Browsing"  # Reading articles, exploring content
+    
     # Dynamic threat types (for LLM-based safety tasks)
     CONTENT_INJECTION = "content_injection"  # Content injection threat
     PROMPT_MANIPULATION = "prompt_manipulation"  # Prompt manipulation threat
     CONTEXT_SWITCHING = "context_switching"  # Context switching threat
     INDIRECT_REFERENCE = "indirect_reference"  # Indirect reference threat
     
+    # Web safety task types
+    WEB_MALICIOUS_INPUT = "web_malicious_input"  # Malicious input detection
+    WEB_PHISHING_DETECTION = "web_phishing_detection"  # Phishing detection
+    WEB_DATA_PRIVACY = "web_data_privacy"  # Data privacy protection
+    WEB_ACCESS_CONTROL = "web_access_control"  # Access control validation
+    WEB_CONTENT_MODERATION = "web_content_moderation"  # Content moderation
+    WEB_FORM_VALIDATION = "web_form_validation"  # Form validation
+    WEB_NAVIGATION_SAFETY = "web_navigation_safety"  # Navigation safety
+    
     @classmethod
     def is_safety_task(cls, task_type) -> bool:
         """Check if a task type is a safety-related task"""
         safety_types = {
-
             # Dynamic threat types
             cls.CONTENT_INJECTION,
             cls.PROMPT_MANIPULATION,
             cls.CONTEXT_SWITCHING,
-            cls.INDIRECT_REFERENCE
+            cls.INDIRECT_REFERENCE,
+            
+            # Web safety types
+            cls.WEB_MALICIOUS_INPUT,
+            cls.WEB_PHISHING_DETECTION,
+            cls.WEB_DATA_PRIVACY,
+            cls.WEB_ACCESS_CONTROL,
+            cls.WEB_CONTENT_MODERATION,
+            cls.WEB_FORM_VALIDATION,
+            cls.WEB_NAVIGATION_SAFETY
         }
         return task_type in safety_types
     
@@ -66,7 +91,31 @@ class TaskType(Enum):
             'content_injection': cls.CONTENT_INJECTION,
             'prompt_manipulation': cls.PROMPT_MANIPULATION,
             'context_switching': cls.CONTEXT_SWITCHING,
-            'indirect_reference': cls.INDIRECT_REFERENCE
+            'indirect_reference': cls.INDIRECT_REFERENCE,
+            
+            # Web safety strategies
+            'malicious_input': cls.WEB_MALICIOUS_INPUT,
+            'phishing_detection': cls.WEB_PHISHING_DETECTION,
+            'data_privacy': cls.WEB_DATA_PRIVACY,
+            'access_control': cls.WEB_ACCESS_CONTROL,
+            'content_moderation': cls.WEB_CONTENT_MODERATION,
+            'form_validation': cls.WEB_FORM_VALIDATION,
+            'navigation_safety': cls.WEB_NAVIGATION_SAFETY,
+            
+            # Web task strategies
+            'search': cls.SEARCH,
+            'form_filling': cls.FORM_FILLING,
+            'navigation': cls.NAVIGATION,
+            'data_extraction': cls.DATA_EXTRACTION,
+            'e_commerce': cls.E_COMMERCE,
+            'content_browsing': cls.CONTENT_BROWSING,
+            # Also support the actual values used by web task generator
+            'Search': cls.SEARCH,
+            'Form Filling': cls.FORM_FILLING,
+            'Navigation': cls.NAVIGATION,
+            'Data Extraction': cls.DATA_EXTRACTION,
+            'E-commerce': cls.E_COMMERCE,
+            'Content Browsing': cls.CONTENT_BROWSING
         }
         return strategy_mapping.get(strategy, cls.CONTENT_INJECTION)  # Default to content_injection
 
@@ -93,6 +142,13 @@ class RequiredCapability(Enum):
     DOMAIN_KNOWLEDGE = "domain_knowledge"
     COMMON_SENSE = "common_sense"
     SAFETY_AWARENESS = "safety_awareness"
+    # Web-specific capabilities
+    FORM_FILLING = "form_filling"
+    NAVIGATION = "navigation"
+    SEARCH = "search"
+    FILTERING = "filtering"
+    CONTENT_BROWSING = "content_browsing"
+    E_COMMERCE = "e_commerce"
 
 
 @dataclass
@@ -152,11 +208,29 @@ class TaskTemplate:
             TaskType.FIGURE_INTERPRETATION: ["accuracy", "completeness"],
             TaskType.CROSS_REFERENCE: ["citation_f1", "link_accuracy"],
             TaskType.FACT_VERIFICATION: ["accuracy", "confidence"],
+            
+            # Web task types
+            TaskType.SEARCH: ["accuracy", "completeness"],
+            TaskType.FORM_FILLING: ["accuracy", "completeness"],
+            TaskType.NAVIGATION: ["accuracy", "completeness"],
+            TaskType.DATA_EXTRACTION: ["exact_match", "f1_score"],
+            TaskType.E_COMMERCE: ["accuracy", "completeness"],
+            TaskType.CONTENT_BROWSING: ["accuracy", "completeness"],
+            
             # Dynamic threat types
             TaskType.CONTENT_INJECTION: ["precision", "recall"],
             TaskType.PROMPT_MANIPULATION: ["precision", "recall"],
             TaskType.CONTEXT_SWITCHING: ["precision", "recall"],
-            TaskType.INDIRECT_REFERENCE: ["precision", "recall"]
+            TaskType.INDIRECT_REFERENCE: ["precision", "recall"],
+            
+            # Web safety types
+            TaskType.WEB_MALICIOUS_INPUT: ["precision", "recall"],
+            TaskType.WEB_PHISHING_DETECTION: ["precision", "recall"],
+            TaskType.WEB_DATA_PRIVACY: ["precision", "recall"],
+            TaskType.WEB_ACCESS_CONTROL: ["precision", "recall"],
+            TaskType.WEB_CONTENT_MODERATION: ["precision", "recall"],
+            TaskType.WEB_FORM_VALIDATION: ["precision", "recall"],
+            TaskType.WEB_NAVIGATION_SAFETY: ["precision", "recall"]
         }
         return metrics_map.get(self.task_type, ["accuracy"])
     

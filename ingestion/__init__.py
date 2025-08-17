@@ -5,6 +5,7 @@ Ingestion Layer - Document parsing, cleaning, and chunking
 from .parsers import PDFParser, HTMLParser, DocumentParser
 from .chunkers import SemanticChunker, HierarchicalChunker
 from .cleaners import TextCleaner, StructureCleaner
+from .web_collector import WebCollector, WebPageData, WebElement
 
 __all__ = [
     "PDFParser", 
@@ -13,5 +14,8 @@ __all__ = [
     "SemanticChunker",
     "HierarchicalChunker", 
     "TextCleaner",
-    "StructureCleaner"
+    "StructureCleaner",
+    "WebCollector",
+    "WebPageData",
+    "WebElement"
 ]

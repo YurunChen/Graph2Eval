@@ -13,11 +13,64 @@ from loguru import logger
 
 from ingestion.parsers import DocumentStructure, ParsedElement
 from ingestion.chunkers import Chunk, DocumentChunker, SemanticChunker
-from .node_types import Node, NodeType, create_node, ChunkNode, ParagraphNode, TableNode, HeadingNode, FigureNode, EntityNode
-from .edge_types import Edge, EdgeType, create_edge, SequenceEdge, ContainsEdge, ReferenceEdge, SemanticEdge, EntityRelationEdge, TableContextEdge, FigureContextEdge
+from .node_types import Node, NodeType, create_node, ChunkNode, ParagraphNode, TableNode, HeadingNode, FigureNode, EntityNode, WebPageNode, WebElementNode
+from .edge_types import Edge, EdgeType, create_edge, SequenceEdge, ContainsEdge, ReferenceEdge, SemanticEdge, EntityRelationEdge, TableContextEdge, FigureContextEdge, WebNavigationEdge, WebInteractionEdge
+
+# Web Agent imports
+try:
+    from ingestion.web_collector import WebPageData, WebElement
+    WEB_AGENT_AVAILABLE = True
+except ImportError:
+    WEB_AGENT_AVAILABLE = False
 from .embeddings import EmbeddingManager, NodeVectorIndex
 from .storage import GraphStorage, JSONStorage
 from config_manager import get_config
+
+
+@dataclass
+class WebGraphBuildConfig:
+    """Configuration for web graph building"""
+    
+    # Web-specific settings
+    create_navigation_edges: bool = True
+    create_interaction_edges: bool = True
+    create_layout_edges: bool = True
+    create_data_flow_edges: bool = True
+    
+    # Interaction analysis
+    analyze_click_triggers: bool = True
+    analyze_form_submissions: bool = True
+    analyze_data_flow: bool = True
+    
+    # Spatial analysis
+    spatial_threshold: float = 50.0  # pixels
+    layout_analysis: bool = True
+    
+    # Multi-page settings
+    cross_page_links: bool = True
+    session_tracking: bool = True
+    
+    # Inherit from GraphBuildConfig
+    create_chunk_nodes: bool = True
+    create_element_nodes: bool = True
+    create_entity_nodes: bool = True
+    create_sequence_edges: bool = True
+    create_containment_edges: bool = True
+    create_reference_edges: bool = True
+    create_semantic_edges: bool = True
+    create_entity_edges: bool = True
+    create_context_edges: bool = True
+    semantic_similarity_threshold: float = 0.7
+    reference_detection_threshold: float = 0.8
+    entity_confidence_threshold: float = 0.7
+    use_chunking: bool = True
+    chunk_size: int = 500
+    chunk_overlap: int = 50
+    entity_types: List[str] = None
+    
+    def __post_init__(self):
+        if self.entity_types is None:
+            self.entity_types = ["PERSON", "ORG", "GPE", "PRODUCT", "EVENT", "DATE", "MONEY"]
 
 
 @dataclass
@@ -201,6 +254,13 @@ class GraphBuilder:
     
     def build_graph(self, document: DocumentStructure) -> DocumentGraph:
         """Build complete graph from document"""
+        # Type check to ensure document is DocumentStructure
+        logger.info(f"Document type: {type(document).__name__}")
+        logger.info(f"Document attributes: {dir(document)}")
+        
+        if not hasattr(document, 'elements'):
+            raise TypeError(f"Expected DocumentStructure, got {type(document).__name__}. Document must have 'elements' attribute.")
+        
         logger.info(f"Building graph for document: {document.file_path}")
         
         # Create graph
@@ -255,7 +315,14 @@ class GraphBuilder:
         """Create nodes from document elements"""
         logger.info(f"Creating nodes from {len(elements)} elements")
         
-        for element in elements:
+        for i, element in enumerate(elements):
+            logger.debug(f"Processing element {i}: type={type(element).__name__}, element_type={getattr(element, 'element_type', 'N/A')}")
+            
+            # Check if element has the expected attributes
+            if not hasattr(element, 'element_type'):
+                logger.warning(f"Element {i} does not have element_type attribute: {dir(element)}")
+                continue
+                
             node = self._element_to_node(element)
             if node:
                 graph.add_node(node)
@@ -334,11 +401,28 @@ class GraphBuilder:
     
     def _create_entity_nodes(self, graph: DocumentGraph, elements: List[ParsedElement]):
         """Extract and create entity nodes"""
+        # Type check to ensure elements is a list
+        if not isinstance(elements, list):
+            logger.error(f"Expected list of ParsedElement, got {type(elements).__name__}")
+            return
+        
         logger.info("Extracting entities from document")
+        logger.info(f"Number of elements: {len(elements)}")
         
         entity_mentions = {}  # canonical_name -> EntityNode
         
-        for element in elements:
+        for i, element in enumerate(elements):
+            logger.debug(f"Processing element {i}: type={type(element).__name__}, element_type={getattr(element, 'element_type', 'N/A')}")
+            
+            # Check if element has the expected attributes
+            if not hasattr(element, 'element_type'):
+                logger.warning(f"Element {i} does not have element_type attribute: {dir(element)}")
+                continue
+                
+            if not hasattr(element, 'content'):
+                logger.warning(f"Element {i} does not have content attribute: {dir(element)}")
+                continue
+                
             if element.element_type in ["paragraph", "heading"]:
                 entities = self._extract_entities(element.content)
                 
@@ -448,6 +532,11 @@ class GraphBuilder:
     
     def _create_containment_edges(self, graph: DocumentGraph, nodes: List[Node], elements: List[ParsedElement]):
         """Create containment edges (heading -> paragraphs, etc.)"""
+        # Type check to ensure elements is a list
+        if not isinstance(elements, list):
+            logger.error(f"Expected list of ParsedElement, got {type(elements).__name__}")
+            return
+        
         edge_count = 0
         
         # Find hierarchical relationships
@@ -665,3 +754,257 @@ class GraphBuilder:
         if node1.bbox and node2.bbox:
             return node1.bbox[1] < node2.bbox[1]  # Compare y-coordinates
         return False
+    
+    # Web Graph Building Methods
+    def build_web_graph(self, web_pages: List[WebPageData]) -> DocumentGraph:
+        """Build web interaction graph from collected page data"""
+        
+        if not WEB_AGENT_AVAILABLE:
+            logger.warning("Web Agent not available, cannot build web graph")
+            return None
+        
+        logger.info(f"Building web graph from {len(web_pages)} pages")
+        
+        # Create graph
+        graph = DocumentGraph(
+            storage=self.storage,
+            embedding_manager=self.embedding_manager
+        )
+        
+        # Step 1: Create page nodes
+        page_nodes = self._create_page_nodes(graph, web_pages)
+        
+        # Step 2: Create element nodes
+        element_nodes = self._create_web_element_nodes(graph, web_pages)
+        
+        # Step 3: Create web-specific edges
+        self._create_web_edges(graph, web_pages, page_nodes, element_nodes)
+        
+        logger.info(f"Web graph built successfully: {graph.get_stats()}")
+        return graph
+    
+    def _create_page_nodes(self, graph: DocumentGraph, web_pages: List[WebPageData]) -> Dict[str, WebPageNode]:
+        """Create nodes for web pages"""
+        
+        page_nodes = {}
+        
+        for page_data in web_pages:
+            # Determine page type
+            page_type = self._classify_page_type(page_data)
+            
+            # Create page node
+            page_node = WebPageNode(
+                node_id=f"page_{uuid.uuid4().hex[:8]}",
+                node_type=NodeType.WEB_PAGE,
+                content=f"Page: {page_data.title}",
+                metadata={
+                    "url": page_data.url,
+                    "title": page_data.title,
+                    "page_type": page_type,
+                    "load_time": page_data.load_time,
+                    "page_size": page_data.page_size,
+                    "links": page_data.links,
+                    "clickable_elements": page_data.clickable_elements,
+                    "form_elements": page_data.form_elements,
+                    "table_elements": page_data.table_elements
+                },
+                url=page_data.url,
+                title=page_data.title,
+                page_type=page_type,
+                load_time=page_data.load_time,
+                page_size=page_data.page_size
+            )
+            
+            graph.add_node(page_node)
+            page_nodes[page_data.url] = page_node
+            
+            logger.info(f"Created page node: {page_node.node_id} for {page_data.url}")
+        
+        return page_nodes
+    
+    def _create_web_element_nodes(self, graph: DocumentGraph, web_pages: List[WebPageData]) -> Dict[str, WebElementNode]:
+        """Create nodes for web elements"""
+        
+        element_nodes = {}
+        
+        for page_data in web_pages:
+            if not page_data.elements:
+                continue
+                
+            # Check if elements are WebElement objects
+            if not hasattr(page_data.elements[0], 'element_type'):
+                logger.warning(f"Skipping element node creation for page {page_data.url}: elements are not WebElement objects")
+                continue
+                
+            for element in page_data.elements:
+                # Create element node based on type
+                element_node = self._create_element_node(element, page_data.url)
+                
+                graph.add_node(element_node)
+                element_nodes[element.element_id] = element_node
+        
+        logger.info(f"Created {len(element_nodes)} element nodes")
+        return element_nodes
+    
+    def _create_element_node(self, element: WebElement, page_url: str) -> WebElementNode:
+        """Create appropriate element node based on element type"""
+        
+        # Map element type to node type
+        type_mapping = {
+            'button': NodeType.WEB_BUTTON,
+            'input_text': NodeType.WEB_INPUT,
+            'input_choice': NodeType.WEB_INPUT,
+            'link': NodeType.WEB_LINK,
+            'table': NodeType.WEB_TABLE,
+            'image': NodeType.WEB_IMAGE,
+            'form': NodeType.WEB_FORM,
+            'select': NodeType.WEB_INPUT,
+            'textarea': NodeType.WEB_INPUT
+        }
+        
+        node_type = type_mapping.get(element.element_type, NodeType.WEB_ELEMENT)
+        
+        # Create base element node
+        element_node = WebElementNode(
+            node_id=element.element_id,
+            node_type=node_type,
+            content=element.text_content or element.placeholder or element.value or f"{element.element_type} element",
+            metadata={
+                "page_url": page_url,
+                "tag_name": element.tag_name,
+                "css_selector": element.css_selector,
+                "attributes": element.attributes
+            },
+            source_file=page_url,
+            bbox=(element.x, element.y, element.x + element.width, element.y + element.height),
+            element_type=element.element_type,
+            tag_name=element.tag_name,
+            text_content=element.text_content,
+            placeholder=element.placeholder,
+            value=element.value,
+            href=element.href,
+            src=element.src,
+            x=element.x,
+            y=element.y,
+            width=element.width,
+            height=element.height,
+            css_classes=element.css_classes,
+            css_selector=element.css_selector,
+            is_clickable=element.is_clickable,
+            is_input=element.is_input,
+            is_visible=element.is_visible,
+            is_enabled=element.is_enabled,
+            input_type=element.input_type,
+            required=element.required,
+            options=element.options
+        )
+        
+        return element_node
+    
+    def _create_web_edges(self, graph: DocumentGraph, web_pages: List[WebPageData], 
+                         page_nodes: Dict[str, WebPageNode], 
+                         element_nodes: Dict[str, WebElementNode]):
+        """Create web-specific edges"""
+        
+        # Create navigation edges between pages
+        if self.config.create_navigation_edges:
+            self._create_navigation_edges(graph, web_pages, page_nodes, element_nodes)
+        
+        # Create interaction edges
+        if self.config.create_interaction_edges:
+            self._create_interaction_edges(graph, web_pages, element_nodes)
+    
+    def _create_navigation_edges(self, graph: DocumentGraph, web_pages: List[WebPageData],
+                                page_nodes: Dict[str, WebPageNode], 
+                                element_nodes: Dict[str, WebElementNode]):
+        """Create navigation edges between pages"""
+        
+        for page_data in web_pages:
+            source_page = page_nodes.get(page_data.url)
+            if not source_page:
+                continue
+            
+            # Find links to other pages
+            for element in page_data.elements:
+                if not hasattr(element, 'element_type') or not hasattr(element, 'href'):
+                    continue
+                if element.element_type == 'a' and element.href:
+                    target_url = element.href
+                    target_page = page_nodes.get(target_url)
+                    
+                    if target_page and target_page != source_page:
+                        # Create navigation edge
+                        nav_edge = WebNavigationEdge(
+                            edge_id=f"nav_{source_page.node_id}_{target_page.node_id}",
+                            edge_type=EdgeType.WEB_NAVIGATION,
+                            source_node_id=source_page.node_id,
+                            target_node_id=target_page.node_id,
+                            weight=1.0,
+                            navigation_type="link",
+                            target_url=target_url,
+                            navigation_method="GET"
+                        )
+                        
+                        graph.add_edge(nav_edge)
+    
+    def _create_interaction_edges(self, graph: DocumentGraph, web_pages: List[WebPageData],
+                                 element_nodes: Dict[str, WebElementNode]):
+        """Create interaction edges between elements"""
+        
+        for page_data in web_pages:
+            # Type check to ensure elements are WebElement objects
+            if not page_data.elements:
+                continue
+                
+            # Check if elements are WebElement objects
+            if not hasattr(page_data.elements[0], 'text_content'):
+                logger.warning(f"Skipping interaction edge creation for page {page_data.url}: elements are not WebElement objects")
+                continue
+            
+            # Find form elements and their submit buttons
+            form_elements = [e for e in page_data.elements if e.element_type in ['input_text', 'input_choice', 'select', 'textarea']]
+            submit_buttons = [e for e in page_data.elements if e.element_type == 'button' and hasattr(e, 'text_content') and 'submit' in e.text_content.lower()]
+            
+            # Create form submission edges
+            for button in submit_buttons:
+                for form_elem in form_elements:
+                    button_node = element_nodes.get(button.element_id)
+                    form_node = element_nodes.get(form_elem.element_id)
+                    
+                    if button_node and form_node:
+                        interaction_edge = WebInteractionEdge(
+                            edge_id=f"interaction_{form_node.node_id}_{button_node.node_id}",
+                            edge_type=EdgeType.WEB_INTERACTION,
+                            source_node_id=form_node.node_id,
+                            target_node_id=button_node.node_id,
+                            weight=1.0,
+                            interaction_type="form_submit",
+                            interaction_data={},
+                            interaction_result="success"
+                        )
+                        graph.add_edge(interaction_edge)
+    
+    def _classify_page_type(self, page_data: WebPageData) -> str:
+        """Classify the type of web page"""
+        
+        title_lower = page_data.title.lower()
+        
+        # Check for form elements
+        if page_data.form_elements:
+            return "form"
+        
+        # Check for search functionality
+        if page_data.elements and hasattr(page_data.elements[0], 'text_content'):
+            if any('search' in elem.text_content.lower() for elem in page_data.elements):
+                return "search"
+        
+        # Check for product pages
+        if any(word in title_lower for word in ['product', 'item', 'buy', 'shop']):
+            return "product"
+        
+        # Check for listing pages
+        if any(word in title_lower for word in ['list', 'results', 'catalog']):
+            return "listing"
+        
+        # Default classification
+        return "content"

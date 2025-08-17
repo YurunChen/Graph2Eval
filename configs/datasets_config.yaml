@@ -2,7 +2,6 @@
 
 # Dataset creation
 dataset_creation:
-  output_dir: "data/run_files/datasets"
   save_format: "jsonl"  # jsonl, json, csv
   
   # Data splitting

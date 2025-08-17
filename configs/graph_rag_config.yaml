@@ -37,9 +37,7 @@ embeddings:
 # Storage configuration
 storage:
   backend: "json"  # json, sqlite, neo4j
-  file_path: "data/run_files/graph"
   
 # Vector index configuration
 vector_index:
   index_type: "flat"  # flat, faiss
-  save_path: "data/run_files/vectors"

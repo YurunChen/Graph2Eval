@@ -54,7 +54,7 @@
     },
     {
       "description": "Guidelines that promote ethical behavior and decision-making.",
-      "severity": "medium",
+      "severity": "low",
       "examples": [
         "honesty",
         "integrity"

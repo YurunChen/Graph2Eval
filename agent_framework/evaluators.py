@@ -31,6 +31,58 @@ from datetime import datetime
 from .executors import ExecutionResult, LLMExecutor
 from .retrievers import RetrievalResult
 
+# Web Agent availability flag
+WEB_AGENT_AVAILABLE = False
+
+
+@dataclass
+class WebTaskExecutionResult:
+    """Result of web task execution"""
+    
+    task_id: str
+    success: bool
+    execution_time: float
+    steps_completed: int
+    total_steps: int
+    
+    # Step-level results
+    step_results: List[Dict[str, Any]] = field(default_factory=list)
+    
+    # Web-specific metrics
+    navigation_accuracy: float = 0.0
+    interaction_accuracy: float = 0.0
+    data_extraction_accuracy: float = 0.0
+    user_behavior_similarity: float = 0.0
+    
+    # Error information
+    error_type: Optional[str] = None
+    error_message: Optional[str] = None
+    failed_step: Optional[str] = None
+    
+    # Performance metrics
+    page_load_times: List[float] = field(default_factory=list)
+    interaction_times: List[float] = field(default_factory=list)
+    
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert to dictionary"""
+        return {
+            "task_id": self.task_id,
+            "success": self.success,
+            "execution_time": self.execution_time,
+            "steps_completed": self.steps_completed,
+            "total_steps": self.total_steps,
+            "step_results": self.step_results,
+            "navigation_accuracy": self.navigation_accuracy,
+            "interaction_accuracy": self.interaction_accuracy,
+            "data_extraction_accuracy": self.data_extraction_accuracy,
+            "user_behavior_similarity": self.user_behavior_similarity,
+            "error_type": self.error_type,
+            "error_message": self.error_message,
+            "failed_step": self.failed_step,
+            "page_load_times": self.page_load_times,
+            "interaction_times": self.interaction_times
+        }
+
 
 @dataclass
 class EvaluationResult:
@@ -1286,6 +1338,375 @@ class SpecializedEvaluator(TaskEvaluator):
         safety_score = sum(1 for indicator in safety_indicators if indicator in response_lower)
         
         return min(1.0, safety_score / 3)  # Normalize to max 1.0
+
+
+class WebTaskEvaluator:
+    """Evaluates web task execution results"""
+    
+    def __init__(self, config: Optional[Dict[str, Any]] = None):
+        self.config = config or {}
+        
+        # Evaluation thresholds
+        self.navigation_threshold = self.config.get('navigation_threshold', 0.8)
+        self.interaction_threshold = self.config.get('interaction_threshold', 0.7)
+        self.data_extraction_threshold = self.config.get('data_extraction_threshold', 0.6)
+        self.behavior_similarity_threshold = self.config.get('behavior_similarity_threshold', 0.5)
+        
+        # Performance thresholds
+        self.max_page_load_time = self.config.get('max_page_load_time', 10.0)  # seconds
+        self.max_interaction_time = self.config.get('max_interaction_time', 5.0)  # seconds
+    
+    def evaluate_web_task(self, task, execution_result: ExecutionResult, 
+                         step_execution_details: List[Dict[str, Any]]) -> WebTaskExecutionResult:
+        """Evaluate a web task execution"""
+        
+        # Check if Web Agent is available
+        try:
+            from task_craft.task_generator import WebTaskInstance, WebTaskStep, WebTaskType
+            if not isinstance(task, WebTaskInstance):
+                logger.warning("Task is not a WebTaskInstance, skipping web task evaluation")
+                return WebTaskExecutionResult(
+                    task_id=getattr(task, 'task_id', 'unknown'),
+                    success=False,
+                    execution_time=0.0,
+                    steps_completed=0,
+                    total_steps=0,
+                    error_message="Task is not a WebTaskInstance"
+                )
+        except ImportError:
+            logger.warning("Web Agent not available, skipping web task evaluation")
+            return WebTaskExecutionResult(
+                task_id=getattr(task, 'task_id', 'unknown'),
+                success=False,
+                execution_time=0.0,
+                steps_completed=0,
+                total_steps=0,
+                error_message="Web Agent not available"
+            )
+        
+        logger.info(f"Evaluating web task: {task.task_id}")
+        
+        # Initialize result
+        web_result = WebTaskExecutionResult(
+            task_id=task.task_id,
+            success=execution_result.success,
+            execution_time=execution_result.execution_time,
+            steps_completed=len(step_execution_details),
+            total_steps=len(task.task_steps)
+        )
+        
+        if not execution_result.success:
+            web_result.error_type = execution_result.error_type
+            web_result.error_message = execution_result.error_message
+            return web_result
+        
+        # Evaluate step-by-step execution
+        step_results = []
+        for i, step in enumerate(task.task_steps):
+            step_detail = step_execution_details[i] if i < len(step_execution_details) else {}
+            step_result = self._evaluate_step(step, step_detail)
+            step_results.append(step_result)
+            
+            if not step_result.get('success', False):
+                web_result.failed_step = step.step_id
+                break
+        
+        web_result.step_results = step_results
+        
+        # Calculate accuracy metrics
+        web_result.navigation_accuracy = self._calculate_navigation_accuracy(task, step_results)
+        web_result.interaction_accuracy = self._calculate_interaction_accuracy(task, step_results)
+        web_result.data_extraction_accuracy = self._calculate_data_extraction_accuracy(task, step_results)
+        web_result.user_behavior_similarity = self._calculate_behavior_similarity(task, step_results)
+        
+        # Calculate performance metrics
+        web_result.page_load_times = [detail.get('page_load_time', 0) for detail in step_execution_details]
+        web_result.interaction_times = [detail.get('interaction_time', 0) for detail in step_execution_details]
+        
+        # Determine overall success
+        web_result.success = self._determine_overall_success(web_result)
+        
+        logger.info(f"Web task evaluation completed: success={web_result.success}, "
+                   f"navigation_accuracy={web_result.navigation_accuracy:.3f}, "
+                   f"interaction_accuracy={web_result.interaction_accuracy:.3f}")
+        
+        return web_result
+    
+    def _evaluate_step(self, step, step_detail: Dict[str, Any]) -> Dict[str, Any]:
+        """Evaluate a single task step"""
+        
+        step_result = {
+            'step_id': step.step_id,
+            'step_type': step.step_type,
+            'success': False,
+            'accuracy': 0.0,
+            'execution_time': step_detail.get('execution_time', 0),
+            'error': None
+        }
+        
+        # Check if step was executed
+        if not step_detail:
+            step_result['error'] = 'Step not executed'
+            return step_result
+        
+        # Evaluate based on step type
+        if step.step_type == 'navigate':
+            step_result.update(self._evaluate_navigation_step(step, step_detail))
+        elif step.step_type == 'click':
+            step_result.update(self._evaluate_click_step(step, step_detail))
+        elif step.step_type == 'input':
+            step_result.update(self._evaluate_input_step(step, step_detail))
+        elif step.step_type == 'extract':
+            step_result.update(self._evaluate_extraction_step(step, step_detail))
+        else:
+            step_result.update(self._evaluate_generic_step(step, step_detail))
+        
+        return step_result
+    
+    def _evaluate_navigation_step(self, step, step_detail: Dict[str, Any]) -> Dict[str, Any]:
+        """Evaluate navigation step"""
+        
+        result = {}
+        
+        # Check if target page was reached
+        target_url = step.target_page_url
+        actual_url = step_detail.get('final_url', '')
+        
+        if target_url in actual_url or actual_url in target_url:
+            result['success'] = True
+            result['accuracy'] = 1.0
+        else:
+            result['success'] = False
+            result['accuracy'] = 0.0
+            result['error'] = f'Navigation failed: expected {target_url}, got {actual_url}'
+        
+        # Check page load time
+        load_time = step_detail.get('page_load_time', 0)
+        if load_time > self.max_page_load_time:
+            result['warning'] = f'Slow page load: {load_time:.2f}s'
+        
+        return result
+    
+    def _evaluate_click_step(self, step, step_detail: Dict[str, Any]) -> Dict[str, Any]:
+        """Evaluate click step"""
+        
+        result = {}
+        
+        # Check if element was clicked
+        clicked_element = step_detail.get('clicked_element_id', '')
+        target_element = step.target_element_id
+        
+        if clicked_element == target_element:
+            result['success'] = True
+            result['accuracy'] = 1.0
+        else:
+            result['success'] = False
+            result['accuracy'] = 0.0
+            result['error'] = f'Wrong element clicked: expected {target_element}, got {clicked_element}'
+        
+        # Check interaction time
+        interaction_time = step_detail.get('interaction_time', 0)
+        if interaction_time > self.max_interaction_time:
+            result['warning'] = f'Slow interaction: {interaction_time:.2f}s'
+        
+        return result
+    
+    def _evaluate_input_step(self, step, step_detail: Dict[str, Any]) -> Dict[str, Any]:
+        """Evaluate input step"""
+        
+        result = {}
+        
+        # Check if input was provided
+        input_data = step_detail.get('input_data', {})
+        expected_input = step.input_data
+        
+        if input_data and expected_input:
+            # Compare input values
+            accuracy = 0.0
+            for key, expected_value in expected_input.items():
+                if key in input_data:
+                    actual_value = input_data[key]
+                    if str(actual_value).lower() == str(expected_value).lower():
+                        accuracy += 1.0
+                    elif str(expected_value).lower() in str(actual_value).lower():
+                        accuracy += 0.5
+            
+            accuracy /= len(expected_input)
+            result['success'] = accuracy >= 0.8
+            result['accuracy'] = accuracy
+        else:
+            result['success'] = False
+            result['accuracy'] = 0.0
+            result['error'] = 'No input data provided'
+        
+        return result
+    
+    def _evaluate_extraction_step(self, step, step_detail: Dict[str, Any]) -> Dict[str, Any]:
+        """Evaluate data extraction step"""
+        
+        result = {}
+        
+        # Check if data was extracted
+        extracted_data = step_detail.get('extracted_data', {})
+        
+        if extracted_data:
+            # Evaluate extraction quality
+            data_quality = step_detail.get('data_quality', 0.0)
+            result['success'] = data_quality >= 0.6
+            result['accuracy'] = data_quality
+        else:
+            result['success'] = False
+            result['accuracy'] = 0.0
+            result['error'] = 'No data extracted'
+        
+        return result
+    
+    def _evaluate_generic_step(self, step, step_detail: Dict[str, Any]) -> Dict[str, Any]:
+        """Evaluate generic step"""
+        
+        result = {}
+        
+        # Generic success check
+        success = step_detail.get('success', False)
+        result['success'] = success
+        result['accuracy'] = 1.0 if success else 0.0
+        
+        if not success:
+            result['error'] = step_detail.get('error', 'Step failed')
+        
+        return result
+    
+    def _calculate_navigation_accuracy(self, task, step_results: List[Dict[str, Any]]) -> float:
+        """Calculate navigation accuracy"""
+        
+        navigation_steps = [r for r in step_results if r.get('step_type') == 'navigate']
+        
+        if not navigation_steps:
+            return 1.0  # No navigation required
+        
+        successful_navigations = sum(1 for step in navigation_steps if step.get('success', False))
+        return successful_navigations / len(navigation_steps)
+    
+    def _calculate_interaction_accuracy(self, task, step_results: List[Dict[str, Any]]) -> float:
+        """Calculate interaction accuracy"""
+        
+        interaction_steps = [r for r in step_results if r.get('step_type') in ['click', 'input']]
+        
+        if not interaction_steps:
+            return 1.0  # No interactions required
+        
+        total_accuracy = sum(step.get('accuracy', 0) for step in interaction_steps)
+        return total_accuracy / len(interaction_steps)
+    
+    def _calculate_data_extraction_accuracy(self, task, step_results: List[Dict[str, Any]]) -> float:
+        """Calculate data extraction accuracy"""
+        
+        extraction_steps = [r for r in step_results if r.get('step_type') == 'extract']
+        
+        if not extraction_steps:
+            return 1.0  # No extraction required
+        
+        total_accuracy = sum(step.get('accuracy', 0) for step in extraction_steps)
+        return total_accuracy / len(extraction_steps)
+    
+    def _calculate_behavior_similarity(self, task, step_results: List[Dict[str, Any]]) -> float:
+        """Calculate user behavior similarity"""
+        
+        # This is a simplified implementation
+        # In practice, this would compare the agent's behavior patterns with typical user patterns
+        
+        # Check if steps were executed in reasonable order
+        step_order_score = 1.0
+        for i in range(1, len(step_results)):
+            prev_step = step_results[i-1]
+            curr_step = step_results[i]
+            
+            # Check if previous step was successful before current step
+            if not prev_step.get('success', False) and curr_step.get('success', False):
+                step_order_score *= 0.8  # Penalty for executing step after failure
+        
+        # Check execution timing
+        timing_score = 1.0
+        for step in step_results:
+            execution_time = step.get('execution_time', 0)
+            if execution_time > 10.0:  # More than 10 seconds per step
+                timing_score *= 0.9
+        
+        return (step_order_score + timing_score) / 2
+    
+    def _determine_overall_success(self, result: WebTaskExecutionResult) -> bool:
+        """Determine overall task success"""
+        
+        # Check if all required steps were completed
+        if result.steps_completed < result.total_steps:
+            return False
+        
+        # Check accuracy thresholds
+        if result.navigation_accuracy < self.navigation_threshold:
+            return False
+        
+        if result.interaction_accuracy < self.interaction_threshold:
+            return False
+        
+        if result.data_extraction_accuracy < self.data_extraction_threshold:
+            return False
+        
+        # Check for critical errors
+        if result.error_type in ['navigation_error', 'element_not_found', 'timeout_error']:
+            return False
+        
+        return True
+    
+    def generate_evaluation_report(self, results: List[WebTaskExecutionResult]) -> Dict[str, Any]:
+        """Generate comprehensive evaluation report"""
+        
+        if not results:
+            return {"error": "No results to evaluate"}
+        
+        # Calculate overall metrics
+        total_tasks = len(results)
+        successful_tasks = sum(1 for r in results if r.success)
+        success_rate = successful_tasks / total_tasks
+        
+        # Calculate average accuracies
+        avg_navigation_accuracy = sum(r.navigation_accuracy for r in results) / total_tasks
+        avg_interaction_accuracy = sum(r.interaction_accuracy for r in results) / total_tasks
+        avg_data_extraction_accuracy = sum(r.data_extraction_accuracy for r in results) / total_tasks
+        avg_behavior_similarity = sum(r.user_behavior_similarity for r in results) / total_tasks
+        
+        # Calculate performance metrics
+        avg_execution_time = sum(r.execution_time for r in results) / total_tasks
+        avg_page_load_time = sum(sum(r.page_load_times) for r in results) / sum(len(r.page_load_times) for r in results) if any(r.page_load_times for r in results) else 0
+        avg_interaction_time = sum(sum(r.interaction_times) for r in results) / sum(len(r.interaction_times) for r in results) if any(r.interaction_times for r in results) else 0
+        
+        # Error analysis
+        error_types = {}
+        for result in results:
+            if result.error_type:
+                error_types[result.error_type] = error_types.get(result.error_type, 0) + 1
+        
+        report = {
+            "summary": {
+                "total_tasks": total_tasks,
+                "successful_tasks": successful_tasks,
+                "success_rate": success_rate,
+                "avg_execution_time": avg_execution_time
+            },
+            "accuracy_metrics": {
+                "navigation_accuracy": avg_navigation_accuracy,
+                "interaction_accuracy": avg_interaction_accuracy,
+                "data_extraction_accuracy": avg_data_extraction_accuracy,
+                "behavior_similarity": avg_behavior_similarity
+            },
+            "performance_metrics": {
+                "avg_page_load_time": avg_page_load_time,
+                "avg_interaction_time": avg_interaction_time
+            },
+            "error_analysis": error_types,
+            "detailed_results": [r.to_dict() for r in results]
+        }
+        
+        return report
 
 
 class BatchEvaluator:

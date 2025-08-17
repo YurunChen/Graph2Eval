@@ -6,6 +6,8 @@
 
 Bench is a comprehensive **graph-based LLM benchmarking framework** designed for evaluating and improving Large Language Model (LLM) performance across multiple dimensions. This framework combines **Graph-based Retrieval-Augmented Generation** with **automated task generation** and **multi-agent evaluation** to create a robust benchmarking system.
 
+The framework now includes **Web Agent capabilities** for web-based multi-hop task generation and evaluation, enabling comprehensive testing of LLM performance on real-world web interaction scenarios through the integrated web collection and task generation system in the main framework.
+
 ---
 
 ### 🔍 Key Features
@@ -15,6 +17,7 @@ Bench is a comprehensive **graph-based LLM benchmarking framework** designed for
 - **🎯 Task Generation**: Automatically generate diverse tasks from knowledge graphs
 - **🤖 Multi-Agent System**: Five specialized agents (Planner, Retriever, Reasoner, Verifier, Summarizer)
 - **🛡️ Safety Evaluation**: Dynamic safety task generation and evaluation
+- **🌐 Web Agent**: Web-based multi-hop task generation and evaluation
 - **📊 Comprehensive Metrics**: Task success rate, safety compliance, attribution accuracy
 - **🔧 Configurable**: Flexible configuration for different use cases
 
@@ -244,6 +247,7 @@ Bench/
 | `graph_rag_config.yaml` | Graph construction settings |
 | `evaluation_config.yaml` | Evaluation metrics and scoring |
 | `safety_config.yaml` | Safety task generation and evaluation |
+| `web_agent_config.yaml` | Web-based task generation and evaluation |
 
 ### Key Configuration Parameters
 
@@ -304,6 +308,37 @@ system = create_multi_agent_system(
     summarizer_model="gpt-4"         # Use GPT-4 for summarization
 )
 ```
+
+### Web Agent Benchmark
+
+```python
+import asyncio
+from benchmark_runner import BenchmarkRunner
+
+async def run_web_benchmark():
+    # Initialize benchmark runner
+    runner = BenchmarkRunner()
+    
+    # Run web benchmark
+    urls = ["https://example.com", "https://httpbin.org/html"]
+    result = await runner.generate_web_dataset_from_urls(urls)
+    
+    # Get summary
+    print(f"Web dataset generation completed: {result['success']}")
+
+# Run
+asyncio.run(run_web_benchmark())
+```
+
+### Web Agent Task Types
+
+The Web Agent supports various task types:
+
+- **Form Filling**: User registration, contact forms, login forms
+- **Search & Filter**: Keyword search, faceted filtering, sorting
+- **Information Aggregation**: Cross-page data collection, synthesis
+- **Navigation**: Multi-page navigation, link following
+- **Data Extraction**: Table extraction, image analysis, content parsing
 
 ## 📊 Output Structure
 

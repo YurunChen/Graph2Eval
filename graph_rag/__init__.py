@@ -2,7 +2,7 @@
 GraphRAG Layer - Graph construction and retrieval for RAG
 """
 
-from .graph_builder import GraphBuilder, DocumentGraph
+from .graph_builder import GraphBuilder, DocumentGraph, WebGraphBuildConfig
 from .node_types import Node, ChunkNode, EntityNode, TableNode, FigureNode
 from .edge_types import Edge, SequenceEdge, ReferenceEdge, SemanticEdge, EntityRelationEdge
 from .embeddings import EmbeddingManager, VectorIndex
@@ -28,5 +28,6 @@ __all__ = [
     # "HybridRetriever",
     "GraphStorage",
     "Neo4jStorage",
-    "JSONStorage"
+    "JSONStorage",
+    "WebGraphBuildConfig"
 ]

@@ -1,9 +1,9 @@
 # TaskCraft Configuration
 # Configuration for task generation from document graphs
 
-# Task generation settings
+  # Task generation settings
 generation:
-  max_total_tasks: 1000
+  max_total_tasks: 5  # Reduced for faster generation
   require_gold_answer: false
   require_citations: true
   require_reasoning: false
@@ -148,3 +148,39 @@ output:
   filename_prefix: "generated_tasks"
   include_timestamp: true
   include_template_info: true
+
+# Web Task Generation Configuration
+web_task_generation:
+  max_tasks_per_page: 5  # Reduced for faster generation
+  task_types:
+    - "form_filling"
+    - "search"
+    - "navigation"
+    - "data_extraction"
+    - "e_commerce"
+    - "content_browsing"
+  
+  # Task type specific settings
+  form_filling:
+    max_tasks: 5
+    require_form_elements: true
+    
+  search:
+    max_tasks: 5
+    require_search_elements: true
+    
+  navigation:
+    max_tasks: 5
+    require_navigation_elements: true
+    
+  data_extraction:
+    max_tasks: 5
+    require_content_elements: true
+    
+  e_commerce:
+    max_tasks: 5
+    require_product_elements: true
+    
+  content_browsing:
+    max_tasks: 5
+    require_content_elements: true

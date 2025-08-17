@@ -46,6 +46,10 @@ class BenchmarkRunner:
         self.results = {}
         # Create timestamp for this run
         self.run_timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        self.run_timestamp_int = int(time.time())
+        
+        # Create unified output directories once at initialization
+        self.output_dirs = self._create_output_directories()
     
     def _get_timestamped_path(self, base_path: str) -> str:
         """Get path with timestamp prefix"""
@@ -70,6 +74,61 @@ class BenchmarkRunner:
         
         output_config = orchestration_config.get('output', {})
         return Path(output_config.get('base_dir', 'output'))
+    
+    def _create_output_directories(self) -> Dict[str, Path]:
+        """Create unified output directory structure with timestamp based on mode"""
+        # Use existing timestamp if available, otherwise create new one
+        if hasattr(self, 'run_timestamp_int'):
+            timestamp = self.run_timestamp_int
+        else:
+            timestamp = int(time.time())
+            
+        if self.mode == "generate":
+            output_base_dir = self._get_output_base_dir() / f"run_gen_{timestamp}"
+        elif self.mode == "evaluate":
+            output_base_dir = self._get_output_base_dir() / f"run_eval_{timestamp}"
+        else:
+            output_base_dir = self._get_output_base_dir() / f"run_{self.mode}_{timestamp}"
+        
+        output_base_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Create subdirectories
+        directories = {
+            "base": output_base_dir,
+            "web_info": output_base_dir / "web_info",
+            "graph": output_base_dir / "graph",
+            "vectors": output_base_dir / "vectors",
+            "datasets": output_base_dir / "datasets",
+            "results": output_base_dir / "results",
+            "file_images": output_base_dir / "file_images"
+        }
+        
+        # Create all directories
+        for dir_path in directories.values():
+            dir_path.mkdir(parents=True, exist_ok=True)
+        
+        logger.info(f"📁 Output directory created: {output_base_dir}")
+        
+        # Update parsers with output directory for image saving
+        self._update_parser_output_dirs(directories["file_images"])
+        
+        return directories
+    
+    def _update_parser_output_dirs(self, images_dir: Path):
+        """Update parser output directories for image saving"""
+        try:
+            # Update PDF parser
+            if 'pdf_parser' in self.components:
+                self.components['pdf_parser'].output_dir = images_dir
+                logger.info(f"✅ Updated PDF parser output directory: {images_dir}")
+            
+            # Update HTML parser
+            if 'html_parser' in self.components:
+                self.components['html_parser'].output_dir = images_dir
+                logger.info(f"✅ Updated HTML parser output directory: {images_dir}")
+                
+        except Exception as e:
+            logger.warning(f"Failed to update parser output directories: {e}")
     
     def _setup_logging(self):
         """Setup logging based on configuration"""
@@ -239,7 +298,6 @@ class BenchmarkRunner:
         # Initialize Safety components (for safety task generation only)
         try:
             from task_craft.safety_task_generator import SafetyTaskGenerator
-            from datasets.dataset_manager import DatasetManager
             
             # Configure safety task generation
             safety_config = self.config.safety
@@ -267,9 +325,7 @@ class BenchmarkRunner:
                 config=safety_config
             )
             
-            # Initialize dataset manager
-            datasets_config = self.config.datasets
-            self.components['dataset_manager'] = DatasetManager(datasets_config)
+            # Dataset manager functionality integrated directly
             
             logger.info("✅ Safety task generation components initialized")
             
@@ -355,7 +411,7 @@ class BenchmarkRunner:
                 **self.config.ingestion.get('cleaning', {})
             )
             
-            # Initialize parsers and cleaners
+            # Initialize parsers and cleaners (without output_dir for now, will be set later)
             image_config = self.config.ingestion.get('image_processing', {})
             self._initialize_component('pdf_parser', PDFParser, config_section=None,
                                      extract_tables=self.config.ingestion.get('parsing', {}).get('pdf_extract_tables', True),
@@ -520,15 +576,23 @@ class BenchmarkRunner:
                         logger.warning("LLM quality check enabled but no LLM executor available, disabling quality check")
                         task_gen_config.use_llm_quality_check = False
                 
+                # Get current run directory for image path updates
+                current_run_dir = self._get_output_base_dir()
+                
                 self.components['task_generator'] = TaskGenerator(
                     template_library=DEFAULT_TEMPLATE_LIBRARY,
                     config=task_gen_config,
-                    llm_executor=llm_executor
+                    llm_executor=llm_executor,
+                    current_run_dir=current_run_dir
                 )
             else:
+                # Get current run directory for image path updates
+                current_run_dir = self._get_output_base_dir()
+                
                 self.components['task_generator'] = TaskGenerator(
                     template_library=DEFAULT_TEMPLATE_LIBRARY,
-                    config=task_gen_config
+                    config=task_gen_config,
+                    current_run_dir=current_run_dir
                 )
             
             logger.info("✅ TaskCraft components initialized")
@@ -539,7 +603,6 @@ class BenchmarkRunner:
         # Initialize Safety components (for safety task generation only)
         try:
             from task_craft.safety_task_generator import SafetyTaskGenerator
-            from datasets.dataset_manager import DatasetManager
             
             # Configure safety task generation
             safety_config = self.config.safety
@@ -567,9 +630,7 @@ class BenchmarkRunner:
                 config=safety_config
             )
             
-            # Initialize dataset manager
-            datasets_config = self.config.datasets
-            self.components['dataset_manager'] = DatasetManager(datasets_config)
+            # Dataset manager functionality integrated directly
             
             logger.info("✅ Safety task generation components initialized")
             
@@ -582,6 +643,11 @@ class BenchmarkRunner:
         logger.info(f"📄 Processing {len(input_documents)} documents")
         
         self.start_time = time.time()
+        
+        # Use existing output directories
+        output_dirs = self.output_dirs
+        datasets_dir = output_dirs["datasets"]
+        
         # Get agent configuration
         agent_mode = self.config.agent.get('agent_mode', 'single')
         agent_type = self.config.agent.get('agent_type', 'rag')
@@ -618,11 +684,11 @@ class BenchmarkRunner:
             results["success"] = True
             results["total_time"] = time.time() - self.start_time
             
-            # Save results to specified output directory
+            # Save results to unified output directory
             if output_dir:
                 self._save_dataset_generation_results(results, output_dir)
             else:
-                self._save_dataset_generation_results(results, "data/run_files/datasets")
+                self._save_dataset_generation_results(results, str(datasets_dir))
             
             logger.info(f"✅ Dataset generation completed successfully in {results['total_time']:.2f}s")
             
@@ -634,6 +700,572 @@ class BenchmarkRunner:
             raise
         
         return results
+    
+    async def generate_web_dataset_from_urls(self, urls: List[str], output_dir: Optional[str] = None) -> Dict[str, Any]:
+        """Generate web dataset from input URLs"""
+        logger.info("🚀 Starting web dataset generation from URLs")
+        logger.info(f"🌐 Processing {len(urls)} URLs")
+        
+        self.start_time = time.time()
+        
+        # Use existing output directories
+        output_dirs = self.output_dirs
+        web_info_dir = output_dirs["web_info"]
+        graph_dir = output_dirs["graph"]
+        vectors_dir = output_dirs["vectors"]
+        datasets_dir = output_dirs["datasets"]
+        
+        results = {
+            "start_time": datetime.now().isoformat(),
+            "config": {
+                "model_name": self.config.agent.get('execution', {}).get('model_name', 'gpt-4o-mini'),
+                "agent_mode": self.config.agent.get('agent_mode', 'web'),
+                "agent_type": self.config.agent.get('agent_type', 'no_rag'),
+                "max_tasks": self.config.task_craft.get('generation', {}).get('max_total_tasks', 50),
+                "storage_backend": self.config.graph_rag.get('storage', {}).get('backend', 'json')
+            },
+            "urls": urls,
+            "stages": {}
+        }
+        
+        try:
+            # Import Web Agent components
+            from ingestion.web_collector import WebCollector
+            from graph_rag.graph_builder import GraphBuilder, WebGraphBuildConfig
+            from task_craft.task_generator import TaskGenerator
+            
+            # Stage 1: Web Page Collection with Exploration
+            logger.info("🌐 Stage: Web Page Collection with Multi-Step Exploration")
+            stage_start = time.time()
+            
+            # Create web collection config with custom output directory
+            web_collection_config = self.config.ingestion.get('web_collection', {}).copy()
+            web_collection_config['output_dir'] = str(web_info_dir)
+            web_collector = WebCollector(web_collection_config)
+            
+            # Use exploration mode for multi-step cross-page collection
+            web_collection_config = self.config.ingestion.get('web_collection', {})
+            max_depth = web_collection_config.get('exploration', {}).get('max_depth', 3)
+            max_pages_per_depth = web_collection_config.get('exploration', {}).get('max_pages_per_depth', 5)
+            
+            web_pages = await web_collector.collect_web_data_with_exploration(
+                urls, max_depth=max_depth, max_pages_per_depth=max_pages_per_depth
+            )
+            # Use the unified output directory for web collection
+            web_output_path = web_info_dir
+            
+            results["stages"]["web_collection"] = {
+                "collected_pages": len(web_pages),
+                "pages": [page.to_dict() for page in web_pages],
+                "processing_time": time.time() - stage_start,
+                "saved_files": {
+                                    "web_info_dir": str(web_info_dir),
+                "dom_files_dir": str(web_info_dir)
+                }
+            }
+            
+            # Stage 2: Web Graph Construction
+            logger.info("🕸️ Stage: Web Graph Construction")
+            stage_start = time.time()
+            
+            # Create web-specific graph configuration
+            web_graph_config = WebGraphBuildConfig()
+            
+            # Create web-specific storage and embedding manager with custom paths
+            from graph_rag.storage import JSONStorage
+            from graph_rag.embeddings import EmbeddingManager
+            
+            web_storage = JSONStorage()
+            web_embedding_manager = EmbeddingManager()
+        
+            
+            graph_builder = GraphBuilder(
+                config=web_graph_config,
+                embedding_manager=web_embedding_manager,
+                storage=web_storage
+            )
+            web_graph = graph_builder.build_web_graph(web_pages)
+            
+            # Save web graph to custom paths
+            web_graph.save(graph_dir, vectors_dir)
+            
+            results["stages"]["web_graph_construction"] = {
+                "total_nodes": web_graph.stats['total_nodes'],
+                "total_edges": web_graph.stats['total_edges'],
+                "node_types": web_graph.stats['node_types'],
+                "edge_types": web_graph.stats['edge_types'],
+                "processing_time": time.time() - stage_start,
+                "saved_files": {
+                    "web_graph": str(graph_dir),
+                    "vector_index": str(vectors_dir)
+                }
+            }
+            
+            # Stage 3: Web Task Generation
+            logger.info("🎯 Stage: Web Task Generation")
+            stage_start = time.time()
+            web_task_config = self.config.task_craft.get('web_task_generation', {})
+            # Pass LLMExecutor to TaskGenerator
+            from agent_framework.executors import LLMExecutor, ExecutionConfig
+            from task_craft.task_generator import TaskGenerationConfig
+            
+            execution_config = ExecutionConfig(
+                model_name=self.config.agent.get('execution', {}).get('model_name', 'gpt-4o-mini'),
+                temperature=0.1,
+                max_tokens=4000
+            )
+            llm_executor = LLMExecutor.get_instance(execution_config)
+            
+            # Create proper TaskGenerationConfig
+            task_config = TaskGenerationConfig.from_config()
+            # Get current run directory for image path updates
+            current_run_dir = self._get_output_base_dir()
+            task_generator = TaskGenerator(config=task_config, llm_executor=llm_executor, current_run_dir=current_run_dir)
+            max_web_tasks = self.config.task_craft.get('generation', {}).get('max_total_tasks', 50)  # Use generation config
+            web_tasks = task_generator.generate_web_tasks(web_graph, max_web_tasks)
+            
+            # Stage 4: Web Safety Task Generation
+            logger.info("🔒 Stage: Web Safety Task Generation")
+            safety_stage_start = time.time()
+            
+            # Check if web safety tasks are enabled
+            safety_config = self.config.safety.get('safety_task_generation', {})
+            web_safety_config = safety_config.get('web_safety_tasks', {})
+            
+            web_safety_tasks = []
+            if web_safety_config.get('enabled', True):
+                logger.info("🔒 Generating web safety tasks from web tasks")
+                
+                # Import safety task generator
+                from task_craft.safety_task_generator import SafetyTaskGenerator
+                
+                # Create safety task generator
+                safety_task_generator = SafetyTaskGenerator(
+                    config=self.config.safety
+                )
+                
+                # Convert web tasks to dict format for safety task generation
+                web_tasks_dict = [task.to_dict() for task in web_tasks]
+                
+                # Generate web safety tasks
+                max_web_safety_tasks = web_safety_config.get('max_web_safety_tasks', 10)
+                web_safety_tasks = safety_task_generator.generate_web_safety_tasks_from_web_tasks(
+                    web_tasks_dict
+                )
+                
+                logger.info(f"🔒 Generated {len(web_safety_tasks)} web safety tasks")
+            else:
+                logger.info("🔒 Web safety task generation disabled")
+            
+            # Combine normal web tasks and safety tasks
+            all_web_tasks = web_tasks + web_safety_tasks
+            
+            results["stages"]["web_task_generation"] = {
+                "generated_tasks": len(web_tasks),
+                "generated_safety_tasks": len(web_safety_tasks),
+                "total_tasks": len(all_web_tasks),
+                "tasks": [task.to_dict() for task in all_web_tasks],
+                "processing_time": time.time() - stage_start,
+                "safety_generation_time": time.time() - safety_stage_start
+            }
+            
+            results["success"] = True
+            results["total_time"] = time.time() - self.start_time
+            
+            # Save results to unified datasets directory
+            self._save_web_dataset_generation_results(results, str(datasets_dir))
+            
+            logger.info(f"✅ Web dataset generation completed successfully in {results['total_time']:.2f}s")
+            
+        except Exception as e:
+            logger.error(f"❌ Web dataset generation failed: {e}")
+            results["success"] = False
+            results["error"] = str(e)
+            results["total_time"] = time.time() - self.start_time
+            raise
+        
+        return results
+    
+    def _save_web_dataset_generation_results(self, results: Dict[str, Any], output_dir: str):
+        """Save web dataset generation results to specified directory"""
+        try:
+            output_path = Path(output_dir)
+            output_path.mkdir(parents=True, exist_ok=True)
+            
+            # Create results subdirectory
+            results_subdir = output_path / "results"
+            results_subdir.mkdir(parents=True, exist_ok=True)
+            
+            # Save main results
+            results_file = results_subdir / "web_dataset_generation_results.json"
+            
+            # Custom JSON encoder to handle numpy types and Path objects
+            class NumpyEncoder(json.JSONEncoder):
+                def default(self, obj):
+                    if isinstance(obj, np.integer):
+                        return int(obj)
+                    elif isinstance(obj, np.floating):
+                        return float(obj)
+                    elif isinstance(obj, np.ndarray):
+                        return obj.tolist()
+                    elif isinstance(obj, Path):
+                        return str(obj)
+                    return super().default(obj)
+            
+            with open(results_file, 'w', encoding='utf-8') as f:
+                json.dump(self._make_serializable(results), f, indent=2, ensure_ascii=False, cls=NumpyEncoder)
+            
+            # Save web graph data (already saved by graph_builder)
+            graph_results = results.get("stages", {}).get("web_graph_construction", {})
+            if graph_results:
+                web_graph_file = output_path / "web_graph.json"
+                with open(web_graph_file, 'w', encoding='utf-8') as f:
+                    json.dump(graph_results, f, indent=2, ensure_ascii=False)
+            
+            # Save web tasks
+            task_results = results.get("stages", {}).get("web_task_generation", {})
+            tasks = task_results.get("tasks", [])
+            all_web_tasks_file = None  # Initialize variable outside the if block
+            
+            if tasks:
+                # Save web task quality assessment report
+                quality_report_file, detailed_report_file = self._save_web_task_quality_report(tasks, results_subdir)
+                
+                # Save all web tasks
+                all_web_tasks_file = output_path / "all_web_tasks.jsonl"
+                with open(all_web_tasks_file, 'w', encoding='utf-8') as f:
+                    for task in tasks:
+                        f.write(json.dumps(task, ensure_ascii=False) + '\n')
+                
+                # Split and save normal and safety web tasks separately
+                normal_web_tasks = []
+                safety_web_tasks = []
+                
+                for task in tasks:
+                    # Check if it's a safety task by looking at task_id or task_type
+                    if task.get("task_id", "").startswith("web_safety_") or "safety" in task.get("task_type", "").lower():
+                        safety_web_tasks.append(task)
+                    else:
+                        normal_web_tasks.append(task)
+                
+                # Save normal web tasks
+                if normal_web_tasks:
+                    normal_web_tasks_file = output_path / "normal_web_tasks.jsonl"
+                    with open(normal_web_tasks_file, 'w', encoding='utf-8') as f:
+                        for task in normal_web_tasks:
+                            f.write(json.dumps(task, ensure_ascii=False) + '\n')
+                    logger.info(f"✅ Created normal_web_tasks with {len(normal_web_tasks)} tasks: {normal_web_tasks_file}")
+                
+                # Save safety web tasks
+                if safety_web_tasks:
+                    safety_web_tasks_file = output_path / "safety_web_tasks.jsonl"
+                    with open(safety_web_tasks_file, 'w', encoding='utf-8') as f:
+                        for task in safety_web_tasks:
+                            f.write(json.dumps(task, ensure_ascii=False) + '\n')
+                    logger.info(f"✅ Created safety_web_tasks with {len(safety_web_tasks)} tasks: {safety_web_tasks_file}")
+                
+                logger.info(f"📦 Split web tasks: {len(normal_web_tasks)} normal tasks, {len(safety_web_tasks)} safety tasks")
+            else:
+                quality_report_file = None
+                detailed_report_file = None
+            
+            # Add saved file paths to results for summary display
+            saved_files = {
+                "web_dataset_results": str(results_file),
+            }
+            
+            # Add web graph file only if it exists
+            if 'web_graph_file' in locals() and web_graph_file:
+                saved_files["web_graph"] = str(web_graph_file)
+            
+            # Add task-related files only if they exist
+            if all_web_tasks_file:
+                saved_files["all_web_tasks"] = str(all_web_tasks_file)
+            if quality_report_file:
+                saved_files["web_task_quality_report"] = str(quality_report_file)
+            if detailed_report_file:
+                saved_files["web_task_detailed_quality"] = str(detailed_report_file)
+            
+            # Add split dataset files
+            if 'normal_web_tasks_file' in locals() and normal_web_tasks_file:
+                saved_files["normal_web_tasks"] = str(normal_web_tasks_file)
+            if 'safety_web_tasks_file' in locals() and safety_web_tasks_file:
+                saved_files["safety_web_tasks"] = str(safety_web_tasks_file)
+            
+            # Update the results with saved file paths
+            if "stages" in results and "web_task_generation" in results["stages"]:
+                results["stages"]["web_task_generation"]["saved_files"] = saved_files
+            
+            logger.info(f"💾 Web dataset generation results saved to {output_path}")
+            
+        except Exception as e:
+            logger.warning(f"Failed to save web dataset generation results: {e}")
+    
+    def _save_web_task_quality_report(self, tasks: List[Dict[str, Any]], output_path: Path):
+        """Save web task quality assessment report"""
+        try:
+            if not tasks:
+                logger.warning("No web tasks to generate quality report for")
+                return None, None
+            
+            # Calculate quality metrics
+            total_tasks = len(tasks)
+            task_types = {}
+            difficulties = {}
+            quality_scores = []
+            passed_quality_check = 0
+            failed_quality_check = 0
+            
+            # Detailed quality metrics
+            quality_details = {
+                'completeness': [],
+                'realism': [],
+                'complexity': [],
+                'specificity': [],
+                'feasibility': []
+            }
+            
+            for task in tasks:
+                # Task type distribution
+                task_type = task.get('web_task_type', 'unknown')
+                task_types[task_type] = task_types.get(task_type, 0) + 1
+                
+                # Difficulty distribution
+                difficulty = task.get('difficulty', 'unknown')
+                difficulties[difficulty] = difficulties.get(difficulty, 0) + 1
+                
+                # Quality score statistics
+                quality_score = task.get('quality_score')
+                if quality_score is not None:
+                    quality_scores.append(quality_score)
+                
+                # Quality check pass/fail statistics
+                if task.get('passed_quality_check', False):
+                    passed_quality_check += 1
+                else:
+                    failed_quality_check += 1
+                
+                # Detailed quality metrics
+                task_quality_details = task.get('quality_details', {})
+                for key in quality_details:
+                    if key in task_quality_details:
+                        quality_details[key].append(task_quality_details[key])
+            
+            # Calculate averages
+            avg_quality_score = sum(quality_scores) / len(quality_scores) if quality_scores else 0.0
+            min_quality_score = min(quality_scores) if quality_scores else 0.0
+            max_quality_score = max(quality_scores) if quality_scores else 0.0
+            
+            # Detailed quality averages
+            avg_quality_details = {}
+            for key, scores in quality_details.items():
+                avg_quality_details[key] = sum(scores) / len(scores) if scores else 0.0
+            
+            # Create comprehensive quality report
+            quality_report = {
+                "report_metadata": {
+                    "generated_at": datetime.now().isoformat(),
+                    "total_tasks": total_tasks,
+                    "report_type": "web_task_quality_assessment"
+                },
+                "quality_statistics": {
+                    "total_tasks": total_tasks,
+                    "tasks_with_quality_scores": len(quality_scores),
+                    "quality_scores": quality_scores,
+                    "average_quality_score": avg_quality_score,
+                    "min_quality_score": min_quality_score,
+                    "max_quality_score": max_quality_score,
+                    "passed_quality_check": passed_quality_check,
+                    "failed_quality_check": failed_quality_check,
+                    "pass_rate": passed_quality_check / total_tasks if total_tasks > 0 else 0.0
+                },
+                "task_type_distribution": task_types,
+                "difficulty_distribution": difficulties,
+                "detailed_quality_metrics": avg_quality_details,
+                "quality_thresholds": {
+                    "minimum_quality_score": 0.6,
+                    "quality_check_threshold": 0.6
+                },
+                "quality_criteria": {
+                    "completeness": "Task has all essential components (prompt, steps, type, difficulty)",
+                    "realism": "Task describes realistic user behavior with appropriate keywords",
+                    "complexity": "Task has appropriate complexity based on steps, types, and difficulty",
+                    "specificity": "Task has specific actions and clear targets",
+                    "feasibility": "Task is feasible to execute with reasonable steps and duration"
+                }
+            }
+            
+            # Save quality report
+            quality_report_file = output_path / "web_task_quality_report.json"
+            with open(quality_report_file, 'w', encoding='utf-8') as f:
+                json.dump(quality_report, f, indent=2, ensure_ascii=False)
+            
+            logger.info(f"✅ Web task quality report saved to {quality_report_file}")
+            
+            # Also save detailed task quality information
+            detailed_tasks = []
+            for task in tasks:
+                detailed_task = {
+                    "task_id": task.get('task_id'),
+                    "web_task_type": task.get('web_task_type'),
+                    "difficulty": task.get('difficulty'),
+                    "prompt_length": len(task.get('prompt', '')),
+                    "task_steps_count": len(task.get('task_steps', [])),
+                    "quality_score": task.get('quality_score'),
+                    "quality_details": task.get('quality_details', {}),
+                    "quality_reasoning": task.get('quality_reasoning'),
+                    "passed_quality_check": task.get('passed_quality_check', False),
+                    "expected_duration": task.get('expected_duration', 0),
+                    "hop_count": task.get('hop_count', 1),
+                    "interaction_count": task.get('interaction_count', 0)
+                }
+                detailed_tasks.append(detailed_task)
+            
+            detailed_report_file = output_path / "web_task_detailed_quality.json"
+            with open(detailed_report_file, 'w', encoding='utf-8') as f:
+                json.dump(detailed_tasks, f, indent=2, ensure_ascii=False)
+            
+            logger.info(f"✅ Detailed web task quality information saved to {detailed_report_file}")
+            
+            return quality_report_file, detailed_report_file
+            
+        except Exception as e:
+            logger.error(f"❌ Failed to save web task quality report: {e}")
+            raise
+    
+    def _is_web_agent_evaluation(self, tasks: List[Any]) -> bool:
+        """Check if tasks are web tasks that require Web Agent evaluation"""
+        if not tasks:
+            return False
+        
+        # Check if any task has web-specific fields
+        for task in tasks[:5]:  # Check first 5 tasks
+            if isinstance(task, dict):
+                if 'web_task_type' in task or 'task_steps' in task or 'start_page_url' in task:
+                    return True
+            elif hasattr(task, 'web_task_type') or hasattr(task, 'task_steps') or hasattr(task, 'start_page_url'):
+                return True
+        
+        return False
+    
+    async def _run_web_agent_execution_stage(self, tasks: List[Any]) -> Dict[str, Any]:
+        """Run Web Agent execution stage with browser automation"""
+        logger.info("🌐 Running Web Agent execution stage")
+        
+        start_time = time.time()
+        
+        try:
+            # Import Web Agent
+            from agent_framework.web_agent import WebAgent
+            
+            # Use existing output directories
+            output_dirs = self.output_dirs
+            web_agent_output_dir = output_dirs["results"] / "web_agent"
+            
+            # Ensure web_agent directory exists
+            web_agent_output_dir.mkdir(parents=True, exist_ok=True)
+            
+            # Initialize Web Agent with correct output directory
+            web_agent = WebAgent(
+                config=self.config.agent.get('web_agent', {}),
+                output_dir=str(web_agent_output_dir)
+            )
+            
+            # Initialize browser
+            await web_agent.initialize_browser()
+            
+            # Ensure all tasks are WebTaskInstance objects
+            from task_craft.task_generator import WebTaskInstance
+            web_tasks = []
+            for task in tasks:
+                if isinstance(task, WebTaskInstance):
+                    web_tasks.append(task)
+                else:
+                    logger.warning(f"Task {getattr(task, 'task_id', 'unknown')} is not a WebTaskInstance, skipping")
+                    continue
+            
+            if not web_tasks:
+                logger.error("No valid WebTaskInstance objects found for execution")
+                return {
+                    "error": "No valid web tasks found",
+                    "processing_time": time.time() - start_time
+                }
+            
+            # Execute web tasks
+            execution_results = []
+            execution_trajectories = []
+            
+            for task in web_tasks:
+                try:
+                    # Execute task with browser automation
+                    execution_result, trajectory = await web_agent.execute_web_task(task)
+                    execution_results.append(execution_result)
+                    execution_trajectories.append(trajectory)
+                    
+                    logger.info(f"✅ Task {task.task_id} completed: {execution_result.success}")
+                    
+                except Exception as e:
+                    logger.error(f"Failed to execute web task {task.task_id}: {e}")
+                    # Create failed result
+                    from agent_framework.evaluators import WebTaskExecutionResult
+                    failed_result = WebTaskExecutionResult(
+                        task_id=task.task_id,
+                        success=False,
+                        execution_time=0.0,
+                        steps_completed=0,
+                        total_steps=len(task.task_steps) if hasattr(task, 'task_steps') else 0,
+                        error_type="execution_error",
+                        error_message=str(e)
+                    )
+                    execution_results.append(failed_result)
+            
+            # Close browser
+            await web_agent.close_browser()
+            
+            processing_time = time.time() - start_time
+            
+            # Convert execution results to proper format with all required fields
+            formatted_results = []
+            for result in execution_results:
+                if hasattr(result, 'to_dict'):
+                    result_dict = result.to_dict()
+                else:
+                    result_dict = result
+                
+                # Ensure all required fields are present
+                formatted_result = {
+                    "task_id": result_dict.get("task_id", ""),
+                    "task_type": "web_task",  # Add task_type for web tasks
+                    "web_task_type": getattr(result, 'web_task_type', 'Search'),  # Add web_task_type
+                    "success": result_dict.get("success", False),
+                    "answer": result_dict.get("answer", ""),
+                    "execution_time": result_dict.get("execution_time", 0.0),
+                    "tokens_used": result_dict.get("tokens_used", 0),
+                    "model_used": result_dict.get("model_used", "browser_automation"),
+                    "citations": result_dict.get("citations", []),
+                    "reasoning_path": result_dict.get("reasoning_path", []),
+                    "confidence": result_dict.get("confidence", 0.0),
+                    "error_type": result_dict.get("error_type"),
+                    "error_message": result_dict.get("error_message", ""),
+                    "retries_needed": result_dict.get("retries_needed", 0),
+                    "raw_response": result_dict.get("raw_response")
+                }
+                formatted_results.append(formatted_result)
+            
+            return {
+                "results": formatted_results,
+                "trajectories": [traj.to_dict() for traj in execution_trajectories],
+                "total_tasks": len(execution_results),
+                "successful_tasks": sum(1 for r in execution_results if getattr(r, 'success', False)),
+                "processing_time": processing_time
+            }
+            
+        except Exception as e:
+            logger.error(f"Web Agent execution stage failed: {e}")
+            return {
+                "error": str(e),
+                "processing_time": time.time() - start_time
+            }
     
     def _save_dataset_generation_results(self, results: Dict[str, Any], output_dir: str):
         """Save dataset generation results to specified directory"""
@@ -660,72 +1292,46 @@ class BenchmarkRunner:
             with open(results_file, 'w', encoding='utf-8') as f:
                 json.dump(self._make_serializable(results), f, indent=2, ensure_ascii=False, cls=NumpyEncoder)
             
-            # Save graph files to configured paths
+            # Save graph files to unified output directories
             graph_results = results.get("stages", {}).get("graph_construction", {})
             graphs = graph_results.get("graphs", [])
             if graphs:
-                # Get paths from graph_rag_config.yaml
-                graph_rag_config = self.config.graph_rag
-                storage_config = graph_rag_config.get('storage', {})
-                vector_index_config = graph_rag_config.get('vector_index', {})
+                # Use existing output directories
+                output_dirs = self.output_dirs
+                graph_dir = output_dirs["graph"]
+                vectors_dir = output_dirs["vectors"]
                 
-                # Get graph file path from config
-                graph_file_path = storage_config.get('file_path')
-                graph_file = Path(graph_file_path)
-                graph_dir = graph_file.parent
-                graph_dir.mkdir(parents=True, exist_ok=True)
-                
-                # Get vector save path from config
-                vector_save_path = vector_index_config.get('save_path')
-                vector_dir = Path(vector_save_path)
-                vector_dir.mkdir(parents=True, exist_ok=True)
-                
-                for i, graph in enumerate(graphs):
-                    # Save graph using DocumentGraph's save method
-                    base_path = str(graph_file.with_suffix(''))
-                    vector_path = str(vector_dir)
-                    graph.save(base_path, vector_path)
+                # Save the single graph
+                graph = graphs[0]
+                graph.save(graph_dir, vectors_dir)
             
-            # Save task files to configured datasets directory
+            # Save task files to unified datasets directory
             task_results = results.get("stages", {}).get("task_generation", {})
             tasks = task_results.get("tasks", [])
             if tasks:
-                # 从 datasets_config.yaml 读取输出目录
-                datasets_config = self.config.datasets
-                dataset_creation_config = datasets_config.get('dataset_creation', {})
-                output_dir = dataset_creation_config.get('output_dir')
-                
-                tasks_dir = Path(output_dir)
-                tasks_dir.mkdir(parents=True, exist_ok=True)
+                # Use existing output directories
+                output_dirs = self.output_dirs
+                datasets_dir = output_dirs["datasets"]
                 
                 # Save all tasks
                 if tasks:
-                    all_tasks_file = tasks_dir / "all_tasks.jsonl"
+                    all_tasks_file = datasets_dir / "all_tasks.jsonl"
                     with open(all_tasks_file, 'w', encoding='utf-8') as f:
                         for task in tasks:
                             f.write(json.dumps(task.to_dict(), ensure_ascii=False) + '\n')
             
             logger.info(f"💾 Dataset generation results saved to {output_path}")
             
-            # 从配置文件中获取实际路径
-            datasets_config = self.config.datasets
-            dataset_creation_config = datasets_config.get('dataset_creation', {})
-            datasets_output_dir = dataset_creation_config.get('output_dir')
-            
-            graph_rag_config = self.config.graph_rag
-            storage_config = graph_rag_config.get('storage', {})
-            vector_index_config = graph_rag_config.get('vector_index', {})
-            graph_file_path = storage_config.get('file_path')
-            vector_save_path = vector_index_config.get('save_path')
-            
-            logger.info(f"📊 Datasets saved to {datasets_output_dir}/")
-            logger.info(f"🕸️ Graph saved to {Path(graph_file_path).parent}/")
-            logger.info(f"🔍 Vectors saved to {vector_save_path}/")
+            # Log unified output directories
+            output_dirs = self.output_dirs
+            logger.info(f"📊 Datasets saved to {output_dirs['datasets']}/")
+            logger.info(f"🕸️ Graph saved to {output_dirs['graph']}/")
+            logger.info(f"🔍 Vectors saved to {output_dirs['vectors']}/")
             
         except Exception as e:
             logger.warning(f"Failed to save dataset generation results: {e}")
     
-    def evaluate_agent_on_dataset(self, dataset_path: str, graph_path: Optional[str] = None, 
+    async def evaluate_agent_on_dataset(self, dataset_path: str, graph_path: Optional[str] = None, 
                            vectors_path: Optional[str] = None, 
                            output_dir: Optional[str] = None) -> Dict[str, Any]:
         """Evaluate agent performance on existing dataset"""
@@ -736,40 +1342,45 @@ class BenchmarkRunner:
         if vectors_path:
             logger.info(f"🔍 Vectors: {vectors_path}")
         
-            self.start_time = time.time()
-            # Determine agent type
-            agent_mode = self.config.agent.get('agent_mode', 'single')
-            multi_agent_enabled = (agent_mode == 'multi')
-            agent_type = "multi_agent" if multi_agent_enabled else self.config.agent.get('agent_type')
+        self.start_time = time.time()
+        # Determine agent type
+        agent_mode = self.config.agent.get('agent_mode', 'single')
+        multi_agent_enabled = (agent_mode == 'multi')
+        agent_type = "multi_agent" if multi_agent_enabled else self.config.agent.get('agent_type')
             
-            results = {
-                "start_time": datetime.now().isoformat(),
-                "config": {
-                    "model_name": self.config.agent.get('execution', {}).get('model_name', 'gpt-4o-mini'),
-                    "agent_mode": agent_mode,
-                    "agent_type": agent_type,
-                    "dataset_path": dataset_path,
-                    "graph_path": graph_path,
-                    "vectors_path": vectors_path
-                },
-                "stages": {}
-            }
-            
-            # Store results in instance for later saving
-            self.results = results
-            
-            try:
+        results = {
+            "start_time": datetime.now().isoformat(),
+            "config": {
+                "model_name": self.config.agent.get('execution', {}).get('model_name', 'gpt-4o-mini'),
+                "agent_mode": agent_mode,
+                "agent_type": agent_type,
+                "dataset_path": dataset_path,
+                "graph_path": graph_path,
+                "vectors_path": vectors_path
+            },
+            "stages": {}
+                }
+        
+        # Store results in instance for later saving
+        self.results = results
+        
+        try:
                 # Stage 1: Load dataset
                 logger.info("📊 Loading dataset")
                 tasks = self._load_dataset(dataset_path)
+                logger.info(f"📊 Loaded {len(tasks)} tasks")
+                if tasks:
+                    logger.info(f"📊 First task type: {type(tasks[0])}")
+                    if hasattr(tasks[0], 'web_task_type'):
+                        logger.info(f"📊 First task web_task_type: {tasks[0].web_task_type}")
                 results["stages"]["dataset_loading"] = {
                     "tasks_loaded": len(tasks),
                     "dataset_path": dataset_path
                 }
                 
-                # Stage 2: Load graph
+                # Stage 2: Load graph (skip for Web Agent)
                 graph = None
-                if graph_path and 'agent' in self.components:
+                if graph_path and vectors_path and 'agent' in self.components:
                     logger.info("🕸️ Loading graph")
                     graph = self._load_graph(graph_path, vectors_path)
                     
@@ -788,10 +1399,24 @@ class BenchmarkRunner:
                         "vectors_path": vectors_path,
                         "graph_stats": graph.get_stats() if graph else {}
                     }
+                elif agent_mode == 'web':
+                    logger.info("🌐 Web Agent mode - skipping graph loading")
+                    results["stages"]["graph_loading"] = {
+                        "graph_loaded": False,
+                        "reason": "Web Agent mode - no graph required"
+                    }
                 
                 # Stage 3: Task Execution
                 logger.info("🏃‍♂️ Stage: Task Execution")
-                execution_results = self._run_task_execution_stage(tasks)
+                
+                # Check if this is a web agent evaluation
+                agent_mode = self.config.agent.get('agent_mode', 'single')
+                if agent_mode == 'web' or self._is_web_agent_evaluation(tasks):
+                    logger.info("🌐 Using Web Agent for execution")
+                    execution_results = await self._run_web_agent_execution_stage(tasks)
+                else:
+                    execution_results = self._run_task_execution_stage(tasks)
+                
                 results["stages"]["task_execution"] = execution_results
                 
                 # Stage 4: Evaluation
@@ -803,21 +1428,21 @@ class BenchmarkRunner:
                 results["success"] = True
                 results["total_time"] = time.time() - self.start_time
                 
-                # Save evaluation results to specified output directory
+                # Save evaluation results to unified output directory
                 if output_dir:
                     self._save_evaluation_results(results, output_dir)
                 else:
-                    # Use default output directory
-                    output_base = self._get_output_base_dir()
-                    output_dir = output_base / f"run_{self.run_timestamp}"
-                    self._save_evaluation_results(results, output_dir)
+                    # Use existing output directories
+                    output_dirs = self.output_dirs
+                    results_dir = output_dirs["results"]
+                    self._save_evaluation_results(results, str(results_dir))
                 
                 # Save benchmark results
                 self._save_results()
                 
                 logger.info(f"✅ Agent evaluation completed successfully in {results['total_time']:.2f}s")
                 
-            except Exception as e:
+        except Exception as e:
                 logger.error(f"❌ Agent evaluation failed: {e}")
                 results["success"] = False
                 results["error"] = str(e)
@@ -827,7 +1452,9 @@ class BenchmarkRunner:
                 self._save_results()
                 raise
             
-            return results
+        return results
+    
+
     
     def _save_evaluation_results(self, results: Dict[str, Any], output_dir: str):
         """Save evaluation results to specified directory"""
@@ -869,27 +1496,74 @@ class BenchmarkRunner:
                 for line in f:
                     if line.strip():
                         task_data = json.loads(line)
-                        # Convert to TaskInstance
-                        from task_craft.task_generator import TaskInstance
-                        from task_craft.task_templates import TaskDifficulty
                         
-                        task = TaskInstance(
-                            task_id=task_data.get('task_id', ''),
-                            template_id=task_data.get('template_id', ''),
-                            task_type=TaskType(task_data.get('task_type', 'comprehension')),
-                            difficulty=TaskDifficulty(task_data.get('difficulty', 'medium')),
-                            prompt=task_data.get('prompt', ''),
-                            gold_answer=task_data.get('gold_answer', ''),
-                            gold_nodes=task_data.get('gold_nodes', []),
-                            gold_edges=task_data.get('gold_edges', []),
-                            subgraph_nodes=task_data.get('subgraph_nodes', []),
-                            subgraph_edges=task_data.get('subgraph_edges', []),
-                            quality_score=task_data.get('quality_score', None),
-                            quality_details=task_data.get('quality_details', {}),
-                            quality_reasoning=task_data.get('quality_reasoning', None),
-                            passed_quality_check=task_data.get('passed_quality_check', True)
-                        )
-                        tasks.append(task)
+                        # Check if this is a web task
+                        if 'web_task_type' in task_data or 'task_steps' in task_data:
+                            # This is a web task, convert to WebTaskInstance
+                            from task_craft.task_generator import WebTaskInstance, WebTaskStep
+                            
+                            # Convert task_steps to WebTaskStep objects
+                            task_steps = []
+                            for step_data in task_data.get('task_steps', []):
+                                step = WebTaskStep(
+                                    step_id=step_data.get('step_id', ''),
+                                    step_type=step_data.get('step_type', 'navigation'),
+                                    target_element_id=step_data.get('target_element_id', ''),
+                                    target_page_url=step_data.get('target_page_url', ''),
+                                    action_description=step_data.get('action_description', ''),
+                                    expected_result=step_data.get('expected_result', ''),
+                                    input_data=step_data.get('input_data', {}),
+                                    validation_criteria=step_data.get('validation_criteria', {})
+                                )
+                                task_steps.append(step)
+                            
+                            # Create WebTaskInstance
+                            web_task = WebTaskInstance(
+                                task_id=task_data.get('task_id', ''),
+                                template_id=task_data.get('template_id', ''),
+                                task_type=task_data.get('task_type', ''),
+                                prompt=task_data.get('prompt', ''),
+                                gold_answer=task_data.get('gold_answer', ''),
+                                gold_nodes=task_data.get('gold_nodes', []),
+                                difficulty=task_data.get('difficulty', ''),
+                                required_capabilities=task_data.get('required_capabilities', []),
+                                images=task_data.get('images', []),
+                                image_descriptions=task_data.get('image_descriptions', []),
+                                web_task_type=task_data.get('web_task_type', ''),
+                                task_steps=task_steps,
+                                start_page_url=task_data.get('start_page_url', ''),
+                                target_page_urls=task_data.get('target_page_urls', []),
+                                required_elements=task_data.get('required_elements', []),
+                                user_intent=task_data.get('user_intent', ''),
+                                user_context=task_data.get('user_context', {}),
+                                expected_duration=task_data.get('expected_duration', 0),
+                                hop_count=task_data.get('hop_count', 1),
+                                interaction_count=task_data.get('interaction_count', 0),
+                                data_extraction_count=task_data.get('data_extraction_count', 0)
+                            )
+                            tasks.append(web_task)
+                        else:
+                            # Convert to TaskInstance for regular tasks
+                            from task_craft.task_generator import TaskInstance
+                            from task_craft.task_templates import TaskDifficulty, TaskType
+                            
+                            task = TaskInstance(
+                                task_id=task_data.get('task_id', ''),
+                                template_id=task_data.get('template_id', ''),
+                                task_type=TaskType(task_data.get('task_type', 'comprehension')),
+                                difficulty=TaskDifficulty(task_data.get('difficulty', 'medium')),
+                                prompt=task_data.get('prompt', ''),
+                                gold_answer=task_data.get('gold_answer', ''),
+                                gold_nodes=task_data.get('gold_nodes', []),
+                                gold_edges=task_data.get('gold_edges', []),
+                                subgraph_nodes=task_data.get('subgraph_nodes', []),
+                                subgraph_edges=task_data.get('subgraph_edges', []),
+                                quality_score=task_data.get('quality_score', None),
+                                quality_details=task_data.get('quality_details', {}),
+                                quality_reasoning=task_data.get('quality_reasoning', None),
+                                passed_quality_check=task_data.get('passed_quality_check', True)
+                            )
+                            tasks.append(task)
         elif dataset_path.suffix.lower() == '.json':
             # Load from JSON format
             with open(dataset_path, 'r', encoding='utf-8') as f:
@@ -916,66 +1590,72 @@ class BenchmarkRunner:
             raise ValueError(f"Unsupported dataset format: {dataset_path.suffix}")
         
         logger.info(f"✅ Loaded {len(tasks)} tasks from {dataset_path}")
+        if tasks:
+            logger.info(f"✅ First task type: {type(tasks[0])}")
+            if hasattr(tasks[0], 'web_task_type'):
+                logger.info(f"✅ First task web_task_type: {tasks[0].web_task_type}")
         return tasks
     
     def _detect_dataset_paths(self, base_path: str) -> Dict[str, str]:
         """Detect dataset and graph paths from a base directory"""
         base_path = Path(base_path)
+        logger.info(f"🔍 Detecting dataset paths from base_path: {base_path}")
         
-        # Get paths from graph_rag_config.yaml
-        graph_rag_config = self.config.graph_rag
-        storage_config = graph_rag_config.get('storage', {})
-        vector_index_config = graph_rag_config.get('vector_index', {})
-        
-        # Get configured paths
-        graph_file_path = storage_config.get('file_path', 'data/run_files/graph/knowledge_graph.json')
-        vector_save_path = vector_index_config.get('save_path', 'data/run_files/vectors')
-        
-        # Use configured paths
-        run_files_datasets = Path("data/run_files/datasets")
-        run_files_vectors = Path(vector_save_path)
-        
-        # Look for dataset files in data/run_files/datasets/
+        # Look for dataset files only in the specified base_path
         dataset_paths = {}
-        all_tasks_path = run_files_datasets / "all_tasks.jsonl"
+        
+        # Check for all_tasks.jsonl in base_path/datasets/
+        all_tasks_path = base_path / "datasets" / "all_tasks.jsonl"
         if all_tasks_path.exists():
             dataset_paths["all_tasks"] = str(all_tasks_path)
-        else:
-            # Fallback to old structure
-            all_tasks_path = base_path / "datasets" / "all_tasks.jsonl"
-            if all_tasks_path.exists():
-                dataset_paths["all_tasks"] = str(all_tasks_path)
-            else:
-                raise FileNotFoundError(f"All tasks dataset not found at {all_tasks_path}")
         
-        safety_tasks_path = run_files_datasets / "safety_tasks.jsonl"
+        # Check for safety_tasks.jsonl in base_path/datasets/
+        safety_tasks_path = base_path / "datasets" / "safety_tasks.jsonl"
         if safety_tasks_path.exists():
             dataset_paths["safety_tasks"] = str(safety_tasks_path)
-        else:
-            # Fallback to old structure
-            safety_tasks_path = base_path / "datasets" / "safety_tasks.jsonl"
-            if safety_tasks_path.exists():
-                dataset_paths["safety_tasks"] = str(safety_tasks_path)
         
-        # Look for graph files using configured path
-        graph_path = Path(graph_file_path)
+        # Check for all_web_tasks.jsonl in base_path/datasets/
+        web_tasks_path = base_path / "datasets" / "all_web_tasks.jsonl"
+        if web_tasks_path.exists():
+            dataset_paths["all_web_tasks"] = str(web_tasks_path)
+        
+        # Check for normal_web_tasks.jsonl in base_path/datasets/
+        normal_web_tasks_path = base_path / "datasets" / "normal_web_tasks.jsonl"
+        if normal_web_tasks_path.exists():
+            dataset_paths["normal_web_tasks"] = str(normal_web_tasks_path)
+        
+        # Check for safety_web_tasks.jsonl in base_path/datasets/
+        safety_web_tasks_path = base_path / "datasets" / "safety_web_tasks.jsonl"
+        if safety_web_tasks_path.exists():
+            dataset_paths["safety_web_tasks"] = str(safety_web_tasks_path)
+        
+        # Look for graph files in base_path/graph/
+        graph_path = base_path / "graph" / "knowledge_graph.json"
         if not graph_path.exists():
             raise FileNotFoundError(f"Knowledge graph not found at {graph_path}")
         
-        # Check if vectors directory exists using configured path
-        if not run_files_vectors.exists():
-            raise FileNotFoundError(f"Vectors directory not found at {run_files_vectors}")
+        # Look for vectors in base_path/vectors/
+        vectors_path = base_path / "vectors"
+        if not vectors_path.exists():
+            raise FileNotFoundError(f"Vectors directory not found at {vectors_path}")
         
         # Check if vector files exist in the vectors directory
-        vectors_faiss_file = run_files_vectors / "vectors_faiss.faiss"
+        vectors_faiss_file = vectors_path / "vectors_faiss.faiss"
         if not vectors_faiss_file.exists():
             raise FileNotFoundError(f"Vector index file not found at {vectors_faiss_file}")
         
-        return {
+        # Create result dictionary
+        result = {
             "datasets": dataset_paths,
             "graph": str(graph_path),
-            "vectors": str(run_files_vectors)
+            "vectors": str(vectors_path)
         }
+        
+        # Log detected paths in JSON format
+        import json
+        logger.info(f"📋 Detected dataset paths: {json.dumps(result, indent=2, ensure_ascii=False)}")
+        
+        return result
     
     def _load_graph(self, graph_path: str, vectors_path: str):
         """Load graph from file"""
@@ -1291,22 +1971,7 @@ class BenchmarkRunner:
         logger.info(f"{'='*60}\n")
         
         # Get detailed task statistics
-        if 'dataset_manager' in self.components:
-            task_stats = self.components['dataset_manager'].get_task_statistics(all_tasks)
-        else:
-            # Calculate task type distribution
-            normal_task_types = self._count_task_types(normal_tasks)
-            safety_task_types = self._count_task_types(safety_tasks)
-            
-            task_stats = {
-                "total_tasks": len(all_tasks),
-                "normal_tasks": len(normal_tasks),
-                "safety_tasks": len(safety_tasks),
-                "task_type_distribution": {**normal_task_types, **safety_task_types},
-                "normal_task_types": normal_task_types,
-                "safety_task_types": safety_task_types,
-                "safety_task_ratio": len(safety_tasks) / len(all_tasks) if all_tasks else 0.0
-            }
+        task_stats = self.get_task_statistics(all_tasks)
         
         # Log task statistics with proper formatting
         logger.info(f"📊 Task Statistics: {task_stats}")
@@ -1328,14 +1993,9 @@ class BenchmarkRunner:
             # 创建数据集
             dataset_creation_enabled = dataset_creation_config.get('enabled', True)
             if dataset_creation_enabled:
-                # 从 datasets_config.yaml 读取输出目录
-                datasets_config = self.config.datasets
-                dataset_creation_config_from_file = datasets_config.get('dataset_creation', {})
-                output_dir = dataset_creation_config_from_file.get('output_dir', 'data/run_files/datasets')
-                
-                # 创建数据集目录
-                datasets_dir = Path(output_dir)
-                datasets_dir.mkdir(parents=True, exist_ok=True)
+                # 使用现有的输出目录
+                output_dirs = self.output_dirs
+                datasets_dir = output_dirs["datasets"]
                 
                 datasets_created = 0
                 
@@ -1754,10 +2414,9 @@ class BenchmarkRunner:
         logger.info(f"⏱️  Total processing time: {time.time() - stage_start:.2f}s")
         logger.info(f"{'='*60}\n")
         
-        # Save execution results to unified output directory
-        base_dir = self._get_output_base_dir()
-        output_dir = base_dir / f"run_{self.run_timestamp}"
-        output_dir.mkdir(parents=True, exist_ok=True)
+        # Use existing output directories
+        output_dirs = self.output_dirs
+        output_dir = output_dirs["results"]
         
         # Save execution results
         results_file = output_dir / "execution_results.json"
@@ -1851,7 +2510,8 @@ class BenchmarkRunner:
         
         for i, result in enumerate(execution_results):
             task_id = result.get("task_id", f"task_{i}")
-            task_type = result.get("task_type", "unknown")
+            # For web tasks, use web_task_type if available, otherwise fallback to task_type
+            task_type = result.get("web_task_type", result.get("task_type", "unknown"))
             prompt = result.get("prompt", "")
             response = result.get("answer", "")  # ExecutionResult uses 'answer' field
             gold_answer = result.get("gold_answer", "")
@@ -2076,6 +2736,51 @@ class BenchmarkRunner:
             "avg_summarizer_confidence": sum(tm["summarizer_confidence"] for tm in task_metrics if tm["is_multi_agent"]) / max(1, sum(1 for tm in task_metrics if tm["is_multi_agent"]))
         }
         
+        # Add web agent specific metrics if this is a web agent evaluation
+        agent_mode = self.config.agent.get('agent_mode', 'single')
+        if agent_mode == 'web':
+            # Calculate web-specific metrics
+            web_tasks = [tm for tm in task_metrics if tm.get("task_type") in ["Search", "Form Filling", "Navigation", "Data Extraction", "E-commerce", "Content Browsing"]]
+            
+            if web_tasks:
+                # Task completion rate (based on pass_rate)
+                overall_metrics["task_completion_rate"] = sum(tm["pass_rate"] for tm in web_tasks) / len(web_tasks)
+                
+                # Navigation accuracy (for Navigation tasks)
+                navigation_tasks = [tm for tm in web_tasks if tm.get("task_type") == "Navigation"]
+                if navigation_tasks:
+                    overall_metrics["navigation_accuracy"] = sum(tm["pass_rate"] for tm in navigation_tasks) / len(navigation_tasks)
+                else:
+                    overall_metrics["navigation_accuracy"] = 0.0
+                
+                # Form filling accuracy (for Form Filling tasks)
+                form_tasks = [tm for tm in web_tasks if tm.get("task_type") == "Form Filling"]
+                if form_tasks:
+                    overall_metrics["form_filling_accuracy"] = sum(tm["pass_rate"] for tm in form_tasks) / len(form_tasks)
+                else:
+                    overall_metrics["form_filling_accuracy"] = 0.0
+                
+                # Search accuracy (for Search tasks)
+                search_tasks = [tm for tm in web_tasks if tm.get("task_type") == "Search"]
+                if search_tasks:
+                    overall_metrics["search_accuracy"] = sum(tm["pass_rate"] for tm in search_tasks) / len(search_tasks)
+                else:
+                    overall_metrics["search_accuracy"] = 0.0
+                
+                # Data extraction accuracy (for Data Extraction tasks)
+                extraction_tasks = [tm for tm in web_tasks if tm.get("task_type") == "Data Extraction"]
+                if extraction_tasks:
+                    overall_metrics["data_extraction_accuracy"] = sum(tm["pass_rate"] for tm in extraction_tasks) / len(extraction_tasks)
+                else:
+                    overall_metrics["data_extraction_accuracy"] = 0.0
+            else:
+                # Default values if no web tasks
+                overall_metrics["task_completion_rate"] = 0.0
+                overall_metrics["navigation_accuracy"] = 0.0
+                overall_metrics["form_filling_accuracy"] = 0.0
+                overall_metrics["search_accuracy"] = 0.0
+                overall_metrics["data_extraction_accuracy"] = 0.0
+        
         # Calculate agent type distribution
         agent_type_counts = {}
         for tm in task_metrics:
@@ -2098,11 +2803,10 @@ class BenchmarkRunner:
         logger.info(f"⏱️  Total evaluation time: {time.time() - stage_start:.2f}s")
         logger.info(f"{'='*60}\n")
         
-        # Save evaluation results to unified output directory
-        base_dir = self._get_output_base_dir()
-        output_dir = base_dir / f"run_{self.run_timestamp}"
-        logger.info(f"📁 Creating evaluation output directory: {output_dir}")
-        output_dir.mkdir(parents=True, exist_ok=True)
+        # Use existing output directories
+        output_dirs = self.output_dirs
+        output_dir = output_dirs["results"]
+        logger.info(f"📁 Using unified evaluation output directory: {output_dir}")
         
         # Save evaluation results
         results_file = output_dir / "evaluation_results.json"
@@ -2193,6 +2897,51 @@ class BenchmarkRunner:
             counts[difficulty] = counts.get(difficulty, 0) + 1
         return counts
     
+    def get_task_statistics(self, tasks: List[Any]) -> Dict[str, Any]:
+        """Get detailed statistics about task distribution"""
+        
+        # Classify tasks into normal and safety categories
+        normal_tasks = []
+        safety_tasks = []
+        
+        for task in tasks:
+            if hasattr(task, 'task_type') and hasattr(task.task_type, 'is_safety_task'):
+                if task.task_type.is_safety_task():
+                    safety_tasks.append(task)
+                else:
+                    normal_tasks.append(task)
+            else:
+                # Fallback: assume normal task if we can't determine
+                normal_tasks.append(task)
+        
+        # Count by task type
+        task_type_counts = {}
+        safety_type_counts = {}
+        normal_type_counts = {}
+        
+        for task in tasks:
+            task_type = task.task_type.value if hasattr(task.task_type, 'value') else str(task.task_type)
+            task_type_counts[task_type] = task_type_counts.get(task_type, 0) + 1
+            
+            if hasattr(task, 'task_type') and hasattr(task.task_type, 'is_safety_task'):
+                if task.task_type.is_safety_task():
+                    safety_type_counts[task_type] = safety_type_counts.get(task_type, 0) + 1
+                else:
+                    normal_type_counts[task_type] = normal_type_counts.get(task_type, 0) + 1
+            else:
+                # Fallback: assume normal task
+                normal_type_counts[task_type] = normal_type_counts.get(task_type, 0) + 1
+        
+        return {
+            "total_tasks": len(tasks),
+            "normal_tasks": len(normal_tasks),
+            "safety_tasks": len(safety_tasks),
+            "task_type_distribution": task_type_counts,
+            "safety_task_types": safety_type_counts,
+            "normal_task_types": normal_type_counts,
+            "safety_task_ratio": len(safety_tasks) / len(tasks) if tasks else 0
+        }
+    
     def _save_results(self):
         """Save benchmark results"""
         # 从main_config.yaml读取orchestration配置
@@ -2208,10 +2957,9 @@ class BenchmarkRunner:
         if not orchestration_config.get('monitoring', {}).get('save_benchmark_results', True):
             return
         
-        # Create timestamped directory structure using run timestamp
-        base_dir = self._get_output_base_dir()
-        results_dir = base_dir / f"run_{self.run_timestamp}"
-        results_dir.mkdir(parents=True, exist_ok=True)
+        # Use existing output directories
+        output_dirs = self.output_dirs
+        results_dir = output_dirs["results"]
         
         results_file = results_dir / "benchmark_results.json"
         
@@ -2278,13 +3026,16 @@ class BenchmarkRunner:
         
         print(f"Status: {'✅ SUCCESS' if results.get('success') else '❌ FAILED'}")
         print(f"Total Time: {results.get('total_time', 0):.2f}s")
-        print(f"Model: {results['config']['model_name']}")
+        print(f"Model: {results['config'].get('model_name', 'N/A')}")
         
         # Agent configuration details
         agent_mode = results['config'].get('agent_mode', 'single')
         agent_type = results['config'].get('agent_type', 'rag')
         print(f"Agent Mode: {agent_mode}")
-        print(f"Agent Type: {agent_type}")
+        
+        # Only show agent type if not web mode
+        if agent_mode != 'web':
+            print(f"Agent Type: {agent_type}")
         
         if agent_mode == 'multi':
             print(f"Multi-Agent System: Enabled")
@@ -2348,6 +3099,62 @@ class BenchmarkRunner:
                 print(f"  Total tokens used: {stage_data.get('total_tokens_used', 0):,}")
                 print(f"  Avg tokens per task: {stage_data.get('avg_tokens_per_task', 0):.1f}")
                 print(f"  Token range: {stage_data.get('min_tokens_per_task', 0)} - {stage_data.get('max_tokens_per_task', 0)}")
+            elif stage_name == 'web_collection':
+                print(f"  Web pages collected: {stage_data.get('collected_pages', 0)}")
+                pages = stage_data.get('pages', [])
+                if pages:
+                    print(f"  URLs processed:")
+                    for i, page in enumerate(pages[:3], 1):  # Show first 3 URLs
+                        print(f"    {i}. {page.get('url', 'Unknown URL')}")
+                    if len(pages) > 3:
+                        print(f"    ... and {len(pages) - 3} more")
+                
+                # Show saved file paths
+                saved_files = stage_data.get('saved_files', {})
+                if saved_files:
+                    print(f"  💾 Saved files:")
+                    for file_type, file_path in saved_files.items():
+                        print(f"    - {file_type}: {file_path}")
+            elif stage_name == 'web_graph_construction':
+                print(f"  Web graph nodes: {stage_data.get('total_nodes', 0)}")
+                print(f"  Web graph edges: {stage_data.get('total_edges', 0)}")
+                node_types = stage_data.get('node_types', {})
+                if node_types:
+                    print(f"  Node types:")
+                    for node_type, count in node_types.items():
+                        print(f"    {node_type}: {count}")
+                edge_types = stage_data.get('edge_types', {})
+                if edge_types:
+                    print(f"  Edge types:")
+                    for edge_type, count in edge_types.items():
+                        print(f"    {edge_type}: {count}")
+                
+                # Show saved file paths
+                saved_files = stage_data.get('saved_files', {})
+                if saved_files:
+                    print(f"  💾 Saved files:")
+                    for file_type, file_path in saved_files.items():
+                        print(f"    - {file_type}: {file_path}")
+            elif stage_name == 'web_task_generation':
+                print(f"  Web tasks generated: {stage_data.get('generated_tasks', 0)}")
+                tasks = stage_data.get('tasks', [])
+                if tasks:
+                    # Count task types
+                    task_types = {}
+                    for task in tasks:
+                        task_type = task.get('web_task_type', 'unknown')
+                        task_types[task_type] = task_types.get(task_type, 0) + 1
+                    
+                    print(f"  Task type distribution:")
+                    for task_type, count in task_types.items():
+                        print(f"    {task_type}: {count}")
+                
+                # Show saved file paths
+                saved_files = stage_data.get('saved_files', {})
+                if saved_files:
+                    print(f"  💾 Saved files:")
+                    for file_type, file_path in saved_files.items():
+                        print(f"    - {file_type}: {file_path}")
             elif stage_name == 'evaluation':
                 print(f"  Evaluations completed: {stage_data.get('evaluations_completed', 0)}")
                 metrics = stage_data.get('metrics', {})
@@ -2359,43 +3166,76 @@ class BenchmarkRunner:
                     for agent_type, count in agent_type_distribution.items():
                         print(f"    {agent_type}: {count} tasks")
                 
-                # GraphRAG-specific metrics
-                print(f"  🎯 GraphRAG-Specific Metrics:")
-                graphrag_metrics = ['pass_rate', 'task_node', 'task_node_expand', 'avg_sampling_time']
-                for metric in graphrag_metrics:
-                    if metric in metrics:
-                        value = metrics[metric]
-                        if isinstance(value, float):
-                            if metric == 'pass_rate':
-                                print(f"    {metric}: {value:.2%}")
-                            elif metric == 'avg_sampling_time':
-                                print(f"    {metric}: {value:.2f}s")
+                # Check if this is web agent evaluation
+                agent_mode = results['config'].get('agent_mode', 'single')
+                if agent_mode == 'web':
+                    # Web agent specific metrics
+                    print(f"  🌐 Web Agent Metrics:")
+                    web_metrics = ['pass_rate', 'avg_sampling_time']
+                    for metric in web_metrics:
+                        if metric in metrics:
+                            value = metrics[metric]
+                            if isinstance(value, float):
+                                if metric == 'pass_rate':
+                                    print(f"    {metric}: {value:.2%}")
+                                elif metric == 'avg_sampling_time':
+                                    print(f"    {metric}: {value:.2f}s")
+                                else:
+                                    print(f"    {metric}: {value:.3f}")
                             else:
+                                print(f"    {metric}: {value}")
+                    
+                    # Web task specific quality metrics
+                    print(f"  📊 Web Task Quality:")
+                    web_quality_metrics = ['task_completion_rate', 'navigation_accuracy', 'form_filling_accuracy']
+                    for metric in web_quality_metrics:
+                        if metric in metrics:
+                            value = metrics[metric]
+                            if isinstance(value, float):
                                 print(f"    {metric}: {value:.3f}")
+                            else:
+                                print(f"    {metric}: {value}")
                         else:
-                            print(f"    {metric}: {value}")
+                            print(f"    {metric}: N/A")
+                else:
+                    # GraphRAG-specific metrics for non-web agents
+                    print(f"  🎯 GraphRAG-Specific Metrics:")
+                    graphrag_metrics = ['pass_rate', 'task_node', 'task_node_expand', 'avg_sampling_time']
+                    for metric in graphrag_metrics:
+                        if metric in metrics:
+                            value = metrics[metric]
+                            if isinstance(value, float):
+                                if metric == 'pass_rate':
+                                    print(f"    {metric}: {value:.2%}")
+                                elif metric == 'avg_sampling_time':
+                                    print(f"    {metric}: {value:.2f}s")
+                                else:
+                                    print(f"    {metric}: {value:.3f}")
+                            else:
+                                print(f"    {metric}: {value}")
                 
-                # Rule-based metrics
-                print(f"  📈 Rule-based Answer Quality:")
-                rule_metrics = ['exact_match', 'f1_score', 'rouge_l']
-                for metric in rule_metrics:
-                    if metric in metrics:
-                        value = metrics[metric]
-                        if isinstance(value, float):
-                            print(f"    {metric}: {value:.3f}")
-                        else:
-                            print(f"    {metric}: {value}")
-                
-                # LLM-based metrics
-                print(f"  🤖 LLM-based Answer Quality:")
-                llm_metrics = ['answer_quality', 'relevance', 'completeness']
-                for metric in llm_metrics:
-                    if metric in metrics:
-                        value = metrics[metric]
-                        if isinstance(value, float):
-                            print(f"    {metric}: {value:.3f}")
-                        else:
-                            print(f"    {metric}: {value}")
+                # Rule-based metrics (only for non-web agents)
+                if agent_mode != 'web':
+                    print(f"  📈 Rule-based Answer Quality:")
+                    rule_metrics = ['exact_match', 'f1_score', 'rouge_l']
+                    for metric in rule_metrics:
+                        if metric in metrics:
+                            value = metrics[metric]
+                            if isinstance(value, float):
+                                print(f"    {metric}: {value:.3f}")
+                            else:
+                                print(f"    {metric}: {value}")
+                    
+                    # LLM-based metrics (only for non-web agents)
+                    print(f"  🤖 LLM-based Answer Quality:")
+                    llm_metrics = ['answer_quality', 'relevance', 'completeness']
+                    for metric in llm_metrics:
+                        if metric in metrics:
+                            value = metrics[metric]
+                            if isinstance(value, float):
+                                print(f"    {metric}: {value:.3f}")
+                            else:
+                                print(f"    {metric}: {value}")
                 
                 # Token usage metrics
                 print(f"  🔤 Token Usage Metrics:")
@@ -2487,6 +3327,13 @@ class BenchmarkRunner:
                 print(f"  📁 Detailed results saved to CSV files:")
                 print(f"    - full_res.csv: Individual task metrics")
                 print(f"    - summary.csv: Overall metrics summary")
+                
+                # Show saved file paths
+                saved_files = stage_data.get('saved_files', {})
+                if saved_files:
+                    print(f"  💾 Saved files:")
+                    for file_type, file_path in saved_files.items():
+                        print(f"    - {file_type}: {file_path}")
             
             print(f"  Stage time: {stage_data.get('processing_time', 0):.2f}s")
     
@@ -2535,11 +3382,13 @@ def main():
     
     # Dataset generation mode arguments
     parser.add_argument("--documents", "-d", nargs="+", help="Input documents to process (for generate mode)")
+    parser.add_argument("--urls", "-u", nargs="+", help="Input URLs to process for web tasks (for generate mode)")
     parser.add_argument("--output-dir", "-o", help="Output directory for results")
     
     # Evaluation mode arguments
     parser.add_argument("--file","-f", help="Path to file (.jsonl or .json) (for evaluate mode)")
-    parser.add_argument("--graph", "-g", help="Path to graph file (optional, for evaluate mode)")
+    parser.add_argument("--dataset-type", "-t", choices=["normal", "safety", "all"], default="all",
+                       help="Dataset type to evaluate: 'normal' for normal tasks, 'safety' for safety tasks, 'all' for both (default: all)")
     parser.add_argument("--debug", action="store_true", help="Enable debug logging")
     
     args = parser.parse_args()
@@ -2560,6 +3409,8 @@ def main():
         logger.info(f"📊 Max Tasks: {runner.config.task_craft.get('generation', {}).get('max_total_tasks')}")
         logger.info(f"💾 Storage: {runner.config.graph_rag.get('storage', {}).get('backend')}")
         logger.info(f"🎯 Mode: {args.mode}")
+        if args.mode == "evaluate":
+            logger.info(f"📊 Dataset Type: {args.dataset_type}")
         
         # Agent configuration details
         agent_mode = runner.config.agent.get('agent_mode', 'single')
@@ -2567,7 +3418,16 @@ def main():
         logger.info(f"🤖 Agent Mode: {agent_mode}")
         logger.info(f"🤖 Agent Type: {agent_type}")
         
-        if agent_mode == 'multi':
+        # Show Web Agent configuration if applicable
+        if agent_mode == 'web':
+            web_collection_config = runner.config.ingestion.get('web_collection', {})
+            web_task_config = runner.config.task_craft.get('web_task_generation', {})
+            logger.info(f"🌐 Web Agent Configuration:")
+            logger.info(f"   - Max Pages: {web_collection_config.get('max_pages', 10)}")
+            logger.info(f"   - Max Tasks per Page: {web_task_config.get('max_tasks_per_page', 10)}")
+
+        
+        elif agent_mode == 'multi':
             multi_agent_config = runner.config.agent.get('multi_agent', {})
             logger.info(f"    Multi-Agent Configuration:")
             logger.info(f"     - Max Iterations: {multi_agent_config.get('max_iterations', 3)}")
@@ -2592,7 +3452,7 @@ def main():
                         status = "✅ Enabled" if enabled else "❌ Disabled"
                     
                     logger.info(f"     - {role.capitalize()}: {model} ({status})")
-        else:
+        elif agent_mode == 'single':
             # Single agent mode - show configuration details
             logger.info(f"   Single Agent Configuration:")
             if agent_type == 'rag':
@@ -2608,18 +3468,25 @@ def main():
         
         if args.mode == "generate":
             # Dataset generation mode
-            if not args.documents:
-                # Use sample documents for demo
-                logger.error("No documents specified, using sample document")
-                raise ValueError("No documents specified")
-            else:
+            if args.urls:
+                # Web task generation mode
+                logger.info(f"🌐 Processing {len(args.urls)} URLs for web task generation")
+                import asyncio
+                results = asyncio.run(runner.generate_web_dataset_from_urls(args.urls, args.output_dir))
+            elif args.documents:
+                # Document task generation mode
                 input_documents = args.documents
-            
-            logger.info(f"📄 Processing {len(input_documents)} documents for dataset generation")
-            results = runner.generate_dataset_from_documents(input_documents, args.output_dir)
+                logger.info(f"📄 Processing {len(input_documents)} documents for dataset generation")
+                results = runner.generate_dataset_from_documents(input_documents, args.output_dir)
+            else:
+                # Use sample documents for demo
+                logger.error("No documents or URLs specified, using sample document")
+                raise ValueError("No documents or URLs specified")
             
         elif args.mode == "evaluate":
             # Evaluation mode
+            agent_mode = runner.config.agent.get('agent_mode', 'single')
+            
             if not args.file:
                 raise ValueError("File path is required for evaluation mode")
             
@@ -2628,15 +3495,56 @@ def main():
             if dataset_path.is_dir():
                 # Auto-detect paths from directory
                 detected_paths = runner._detect_dataset_paths(args.file)
-                dataset_file = detected_paths["datasets"]["all_tasks"]
-                graph_file = detected_paths["graph"]
-                vectors_file = detected_paths["vectors"]
                 
-                logger.info(f"📊 Auto-detected dataset: {dataset_file}")
-                logger.info(f"🕸️ Auto-detected graph: {graph_file}")
-                logger.info(f"🔍 Auto-detected vectors: {vectors_file}")
-                
-                results = runner.evaluate_agent_on_dataset(dataset_file, graph_file, vectors_file, args.output_dir)
+                # For Web Agent, use web tasks file based on dataset type
+                if agent_mode == 'web':
+                    if args.dataset_type == "normal":
+                        if "normal_web_tasks" in detected_paths["datasets"]:
+                            dataset_file = detected_paths["datasets"]["normal_web_tasks"]
+                            logger.info(f"🌐 Auto-detected normal web tasks file: {dataset_file}")
+                        else:
+                            logger.warning("Normal web tasks file not found, falling back to all web tasks")
+                            dataset_file = detected_paths["datasets"]["all_web_tasks"]
+                    elif args.dataset_type == "safety":
+                        if "safety_web_tasks" in detected_paths["datasets"]:
+                            dataset_file = detected_paths["datasets"]["safety_web_tasks"]
+                            logger.info(f"🌐 Auto-detected safety web tasks file: {dataset_file}")
+                        else:
+                            logger.warning("Safety web tasks file not found, falling back to all web tasks")
+                            dataset_file = detected_paths["datasets"]["all_web_tasks"]
+                    else:  # "all"
+                        dataset_file = detected_paths["datasets"]["all_web_tasks"]
+                        logger.info(f"🌐 Auto-detected all web tasks file: {dataset_file}")
+                    
+                    # For web agent, we don't need graph and vectors files
+                    import asyncio
+                    results = asyncio.run(runner.evaluate_agent_on_dataset(dataset_file, None, None, args.output_dir))
+                else:
+                    # Regular evaluation mode for other agents
+                    if args.dataset_type == "normal":
+                        if "all_tasks" in detected_paths["datasets"]:
+                            dataset_file = detected_paths["datasets"]["all_tasks"]
+                            logger.info(f"📊 Auto-detected normal tasks file: {dataset_file}")
+                        else:
+                            raise FileNotFoundError("Normal tasks file not found")
+                    elif args.dataset_type == "safety":
+                        if "safety_tasks" in detected_paths["datasets"]:
+                            dataset_file = detected_paths["datasets"]["safety_tasks"]
+                            logger.info(f"📊 Auto-detected safety tasks file: {dataset_file}")
+                        else:
+                            raise FileNotFoundError("Safety tasks file not found")
+                    else:  # "all"
+                        dataset_file = detected_paths["datasets"]["all_tasks"]
+                        logger.info(f"📊 Auto-detected all tasks file: {dataset_file}")
+                    
+                    graph_file = detected_paths["graph"]
+                    vectors_file = detected_paths["vectors"]
+                    
+                    logger.info(f"🕸️ Auto-detected graph: {graph_file}")
+                    logger.info(f"🔍 Auto-detected vectors: {vectors_file}")
+                    
+                    import asyncio
+                    results = asyncio.run(runner.evaluate_agent_on_dataset(dataset_file, graph_file, vectors_file, args.output_dir))
             else:
                 raise ValueError("Your file path is not a directory, please check your file path")
         
@@ -2646,17 +3554,25 @@ def main():
         logger.info(f"{'='*60}")
         logger.info(f"✅ Status: {'SUCCESS' if results.get('success') else 'FAILED'}")
         logger.info(f"⏱️  Total Time: {results.get('total_time', 0):.2f}s")
-        logger.info(f"🤖 Model: {results['config']['model_name']}")
+        logger.info(f"🤖 Model: {results['config'].get('model_name', 'N/A')}")
         
         # Check if this is dataset generation or evaluation
         if 'dataset_path' in results['config']:
-            logger.info(f"🤖 Agent Type: {results['config'].get('agent_type', 'unknown')}")
+            agent_mode = results['config'].get('agent_mode', 'single')
+            logger.info(f"🤖 Agent Mode: {agent_mode}")
+            
+            # Only show agent type if not web mode
+            if agent_mode != 'web':
+                logger.info(f"🤖 Agent Type: {results['config'].get('agent_type', 'unknown')}")
+            
             logger.info(f"📊 Dataset: {results['config']['dataset_path']}")
             if results['config'].get('graph_path'):
                 logger.info(f"🕸️ Graph: {results['config']['graph_path']}")
             logger.info(f"🎯 Mode: Agent Evaluation")
         else:
             logger.info(f"🎯 Mode: Dataset Generation")
+            if 'urls' in results['config']:
+                logger.info(f"🌐 Web URLs: {len(results['config']['urls'])} URLs")
         
         logger.info(f"{'='*60}\n")
         runner.print_summary(results)

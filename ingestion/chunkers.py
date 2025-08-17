@@ -86,6 +86,11 @@ class SemanticChunker(DocumentChunker):
     
     def chunk(self, document: DocumentStructure) -> List[Chunk]:
         """Create semantic chunks based on sentence similarity"""
+        # Type check to ensure document is DocumentStructure
+        if not hasattr(document, 'elements'):
+            logger.error(f"Expected DocumentStructure, got {type(document).__name__}. Document must have 'elements' attribute.")
+            return []
+        
         chunks = []
         
         # Group elements by type
@@ -276,6 +281,11 @@ class HierarchicalChunker(DocumentChunker):
     
     def chunk(self, document: DocumentStructure) -> List[Chunk]:
         """Create hierarchical chunks respecting document structure"""
+        # Type check to ensure document is DocumentStructure
+        if not hasattr(document, 'elements'):
+            logger.error(f"Expected DocumentStructure, got {type(document).__name__}. Document must have 'elements' attribute.")
+            return []
+        
         chunks = []
         
         # Build hierarchy

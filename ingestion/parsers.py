@@ -56,10 +56,11 @@ class PDFParser(DocumentParser):
     """Enhanced PDF parser with table and figure detection"""
     
     def __init__(self, extract_tables: bool = True, extract_images: bool = True, 
-                 image_config: Optional[Dict[str, Any]] = None):
+                 image_config: Optional[Dict[str, Any]] = None, output_dir: Optional[Path] = None):
         self.extract_tables = extract_tables
         self.extract_images = extract_images
         self.image_config = image_config or {}
+        self.output_dir = output_dir  # Override default output directory
         self.current_pdf_path = None  # Store current PDF path for image extraction
         
     def parse(self, file_path: Union[str, Path]) -> DocumentStructure:
@@ -289,7 +290,13 @@ class PDFParser(DocumentParser):
         """Save image to file and return the path"""
         try:
             # Get image configuration
-            output_dir = Path(self.image_config.get('image_output_dir', 'data/images'))
+            if self.output_dir:
+                # Use benchmark output directory
+                output_dir = self.output_dir / "images"
+            else:
+                # Use default configuration
+                output_dir = Path(self.image_config.get('image_output_dir', 'data/images'))
+            
             image_format = self.image_config.get('image_format', 'png')
             max_size = self.image_config.get('max_image_size', 2048)
             compress = self.image_config.get('compress_images', True)
@@ -380,7 +387,12 @@ class PDFParser(DocumentParser):
         """Save image using pymupdf and return the path"""
         try:
             # Get image configuration
-            output_dir = Path(self.image_config.get('image_output_dir', 'data/images'))
+            if self.output_dir:
+                # Use benchmark output directory
+                output_dir = self.output_dir / "images"
+            else:
+                # Use default configuration
+                output_dir = Path(self.image_config.get('image_output_dir', 'data/images'))
             image_format = self.image_config.get('image_format', 'png')
             
             # Create output directory
@@ -540,10 +552,11 @@ class HTMLParser(DocumentParser):
     """HTML parser with semantic structure extraction"""
     
     def __init__(self, extract_links: bool = True, extract_images: bool = True,
-                 image_config: Optional[Dict[str, Any]] = None):
+                 image_config: Optional[Dict[str, Any]] = None, output_dir: Optional[Path] = None):
         self.extract_links = extract_links
         self.extract_images = extract_images
         self.image_config = image_config or {}
+        self.output_dir = output_dir  # Override default output directory
         
     def parse(self, file_path: Union[str, Path]) -> DocumentStructure:
         """Parse HTML with semantic structure"""
@@ -749,7 +762,12 @@ class HTMLParser(DocumentParser):
         """Save HTML image to file and return the path"""
         try:
             # Get image configuration
-            output_dir = Path(self.image_config.get('image_output_dir', 'data/images'))
+            if self.output_dir:
+                # Use benchmark output directory
+                output_dir = self.output_dir / "images"
+            else:
+                # Use default configuration
+                output_dir = Path(self.image_config.get('image_output_dir', 'data/images'))
             image_format = self.image_config.get('image_format', 'png')
             
             # Create output directory

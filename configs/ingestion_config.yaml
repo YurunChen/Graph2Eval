@@ -31,16 +31,59 @@ parsing:
 # Image Processing Configuration
 image_processing:
   save_images: true
-  image_output_dir: "data/images"
   image_format: "png"  # png, jpg, jpeg
   max_image_size: 2048  # max width/height in pixels
   compress_images: true
   image_quality: 85  # for jpg compression (1-100)
 
-# Image Storage Configuration
-image_storage:
-  enabled: true
-  save_directory: "data/images"
-  format: "png"  # png, jpg, jpeg
-  max_size: 10485760  # 10MB max file size
-  compress: true
+
+
+# Web Collection Configuration
+web_collection:
+  max_pages: 20  # Increased for better exploration
+  timeout: 30
+  delay: 1.0
+
+  use_playwright: true  # Use Playwright if available, otherwise fallback to Selenium
+  
+  # LLM-based intelligent crawling
+  use_llm_crawling: true  # Enable LLM-based intelligent link selection and quality assessment
+  llm_model_name: "gpt-4o-mini"  # LLM model to use for intelligent crawling
+  llm_temperature: 0.3  # Temperature for LLM responses
+  llm_max_tokens: 1000  # Maximum tokens for LLM responses
+  llm_quality_threshold: 0.6  # Minimum quality threshold for LLM assessments
+  
+  # Multi-step Exploration Configuration
+  exploration:
+    max_depth: 2  # Increased depth for better cross-page exploration
+    max_pages_per_depth: 2  # Increased pages per depth for more comprehensive data
+    follow_external_links: false  # Whether to follow links to external domains
+    skip_patterns:  # URLs to skip during exploration
+      - "javascript:"
+      - "mailto:"
+      - "tel:"
+      - "ftp://"
+      - "/api/"
+      - "/admin/"
+      - "/login"
+      - "/logout"
+      - "/signup"
+      - ".pdf"
+      - ".doc"
+      - ".docx"
+      - ".xls"
+      - ".xlsx"
+      - ".zip"
+      - ".jpg"
+      - ".jpeg"
+      - ".png"
+      - ".gif"
+      - ".mp4"
+      - ".avi"
+    
+    # Link filtering configuration
+    link_filtering:
+      skip_anchor_only: true  # Skip links that are only anchors (e.g., "#section")
+      allow_subdomains: true  # Allow links to subdomains of the same domain
+      allowed_schemes: ["http", "https", ""]  # Allowed URL schemes
+      max_links_per_page: 10  # Maximum links to evaluate per page

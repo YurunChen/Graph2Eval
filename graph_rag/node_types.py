@@ -18,6 +18,15 @@ class NodeType(Enum):
     FIGURE = "figure"
     ENTITY = "entity"
     CHUNK = "chunk"
+    # Web-specific node types
+    WEB_PAGE = "web_page"
+    WEB_ELEMENT = "web_element"
+    WEB_FORM = "web_form"
+    WEB_BUTTON = "web_button"
+    WEB_INPUT = "web_input"
+    WEB_LINK = "web_link"
+    WEB_TABLE = "web_table"
+    WEB_IMAGE = "web_image"
 
 
 @dataclass
@@ -412,3 +421,196 @@ def node_from_dict(data: Dict[str, Any]) -> Node:
         raise ValueError(f"Unknown node type: {node_type}")
     
     return node_class.from_dict(data)
+
+
+@dataclass
+class WebPageNode(Node):
+    """Node representing a web page"""
+    url: str = ""
+    title: str = ""
+    page_type: str = ""  # homepage, product, form, etc.
+    load_time: float = 0.0
+    page_size: int = 0
+    
+    def __post_init__(self):
+        if self.node_type != NodeType.WEB_PAGE:
+            self.node_type = NodeType.WEB_PAGE
+    
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> 'WebPageNode':
+        """Create WebPageNode from dictionary"""
+        embedding = None
+        if "embedding" in data and data["embedding"]:
+            embedding = np.array(data["embedding"])
+        
+        return cls(
+            node_id=data["node_id"],
+            node_type=NodeType.WEB_PAGE,
+            content=data["content"],
+            metadata=data.get("metadata", {}),
+            embedding=embedding,
+            source_file=data.get("source_file"),
+            page_num=data.get("page_num"),
+            bbox=data.get("bbox"),
+            url=data.get("url", ""),
+            title=data.get("title", ""),
+            page_type=data.get("page_type", ""),
+            load_time=data.get("load_time", 0.0),
+            page_size=data.get("page_size", 0)
+        )
+
+
+@dataclass
+class WebElementNode(Node):
+    """Node representing a web page element"""
+    element_type: str = ""  # button, input, table, link, etc.
+    tag_name: str = ""
+    text_content: str = ""
+    placeholder: str = ""
+    value: str = ""
+    href: str = ""
+    src: str = ""
+    x: int = 0
+    y: int = 0
+    width: int = 0
+    height: int = 0
+    css_classes: List[str] = field(default_factory=list)
+    css_selector: str = ""
+    is_clickable: bool = False
+    is_input: bool = False
+    is_visible: bool = True
+    is_enabled: bool = True
+    input_type: str = ""
+    required: bool = False
+    options: List[str] = field(default_factory=list)
+    
+    def __post_init__(self):
+        if self.node_type != NodeType.WEB_ELEMENT:
+            self.node_type = NodeType.WEB_ELEMENT
+    
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> 'WebElementNode':
+        """Create WebElementNode from dictionary"""
+        embedding = None
+        if "embedding" in data and data["embedding"]:
+            embedding = np.array(data["embedding"])
+        
+        return cls(
+            node_id=data["node_id"],
+            node_type=NodeType.WEB_ELEMENT,
+            content=data["content"],
+            metadata=data.get("metadata", {}),
+            embedding=embedding,
+            source_file=data.get("source_file"),
+            page_num=data.get("page_num"),
+            bbox=data.get("bbox"),
+            element_type=data.get("element_type", ""),
+            tag_name=data.get("tag_name", ""),
+            text_content=data.get("text_content", ""),
+            placeholder=data.get("placeholder", ""),
+            value=data.get("value", ""),
+            href=data.get("href", ""),
+            src=data.get("src", ""),
+            x=data.get("x", 0),
+            y=data.get("y", 0),
+            width=data.get("width", 0),
+            height=data.get("height", 0),
+            css_classes=data.get("css_classes", []),
+            css_selector=data.get("css_selector", ""),
+            is_clickable=data.get("is_clickable", False),
+            is_input=data.get("is_input", False),
+            is_visible=data.get("is_visible", True),
+            is_enabled=data.get("is_enabled", True),
+            input_type=data.get("input_type", ""),
+            required=data.get("required", False),
+            options=data.get("options", [])
+        )
+
+
+@dataclass
+class WebFormNode(WebElementNode):
+    """Node representing a web form"""
+    form_elements: List[str] = field(default_factory=list)  # element IDs
+    form_action: str = ""
+    form_method: str = "GET"
+    
+    def __post_init__(self):
+        if self.node_type != NodeType.WEB_FORM:
+            self.node_type = NodeType.WEB_FORM
+
+
+@dataclass
+class WebButtonNode(WebElementNode):
+    """Node representing a web button"""
+    button_type: str = ""  # submit, reset, button
+    button_text: str = ""
+    
+    def __post_init__(self):
+        if self.node_type != NodeType.WEB_BUTTON:
+            self.node_type = NodeType.WEB_BUTTON
+
+
+@dataclass
+class WebInputNode(WebElementNode):
+    """Node representing a web input field"""
+    input_validation: Dict[str, Any] = field(default_factory=dict)
+    input_pattern: str = ""
+    
+    def __post_init__(self):
+        if self.node_type != NodeType.WEB_INPUT:
+            self.node_type = NodeType.WEB_INPUT
+
+
+@dataclass
+class WebLinkNode(WebElementNode):
+    """Node representing a web link"""
+    link_text: str = ""
+    target_url: str = ""
+    link_type: str = ""  # internal, external, download
+    
+    def __post_init__(self):
+        if self.node_type != NodeType.WEB_LINK:
+            self.node_type = NodeType.WEB_LINK
+
+
+@dataclass
+class WebTableNode(WebElementNode):
+    """Node representing a web table"""
+    table_rows: int = 0
+    table_columns: int = 0
+    table_headers: List[str] = field(default_factory=list)
+    
+    def __post_init__(self):
+        if self.node_type != NodeType.WEB_TABLE:
+            self.node_type = NodeType.WEB_TABLE
+
+
+@dataclass
+class WebImageNode(WebElementNode):
+    """Node representing a web image"""
+    image_alt: str = ""
+    image_title: str = ""
+    image_size: tuple = (0, 0)  # (width, height)
+    
+    def __post_init__(self):
+        if self.node_type != NodeType.WEB_IMAGE:
+            self.node_type = NodeType.WEB_IMAGE
+
+
+def create_web_node(node_type: NodeType, **kwargs) -> Node:
+    """Factory function to create web nodes"""
+    node_classes = {
+        NodeType.WEB_PAGE: WebPageNode,
+        NodeType.WEB_ELEMENT: WebElementNode,
+        NodeType.WEB_FORM: WebFormNode,
+        NodeType.WEB_BUTTON: WebButtonNode,
+        NodeType.WEB_INPUT: WebInputNode,
+        NodeType.WEB_LINK: WebLinkNode,
+        NodeType.WEB_TABLE: WebTableNode,
+        NodeType.WEB_IMAGE: WebImageNode,
+    }
+    
+    if node_type not in node_classes:
+        raise ValueError(f"Unknown web node type: {node_type}")
+    
+    return node_classes[node_type](**kwargs)

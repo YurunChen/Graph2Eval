@@ -33,6 +33,13 @@ uvicorn>=0.23.0
 httpx>=0.24.0
 pydantic>=2.0.0
 
+# Web Agent dependencies
+playwright>=1.40.0
+selenium>=4.15.0
+requests-html>=0.10.0
+lxml>=4.9.0
+cssselect>=1.2.0
+
 # Evaluation and metrics
 rouge-score>=0.1.2
 bert-score>=0.3.13

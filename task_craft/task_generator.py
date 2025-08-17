@@ -10,10 +10,25 @@ from typing import List, Dict, Any, Optional, Tuple, Set
 from loguru import logger
 from datetime import datetime
 import re
+from pathlib import Path
 
 from graph_rag.graph_builder import DocumentGraph
-from graph_rag.node_types import Node, NodeType
-from graph_rag.edge_types import Edge, EdgeType
+from graph_rag.node_types import Node, NodeType, WebPageNode, WebElementNode
+from graph_rag.edge_types import Edge, EdgeType, WebNavigationEdge, WebInteractionEdge
+
+# Import ExecutionResult for LLM responses
+try:
+    from agent_framework.executors import ExecutionResult
+except ImportError:
+    # Fallback if not available
+    ExecutionResult = Any
+
+# Web Agent imports
+try:
+    from ingestion.web_collector import WebPageData, WebElement
+    WEB_AGENT_AVAILABLE = True
+except ImportError:
+    WEB_AGENT_AVAILABLE = False
 from .task_templates import TaskTemplate, TaskType, TaskDifficulty, TaskTemplateLibrary, DEFAULT_TEMPLATE_LIBRARY
 from .subgraph_sampler import SubgraphSampler, SamplingConfig
 from config_manager import get_config
@@ -26,6 +41,18 @@ MULTI_HOP_TASK_TYPES = {
     "multi_hop_analysis": TaskType.ANALYSIS,
     "multi_hop_synthesis": TaskType.SYNTHESIS
 }
+
+# Web task types
+class WebTaskType:
+    """Types of web-based tasks"""
+    FORM_FILLING = "form_filling"
+    SEARCH_FILTER = "search_filter"
+    INFORMATION_AGGREGATION = "information_aggregation"
+    NAVIGATION_TASK = "navigation_task"
+    DATA_EXTRACTION = "data_extraction"
+    E_COMMERCE_PURCHASE = "e_commerce_purchase"
+    USER_REGISTRATION = "user_registration"
+    CONTENT_BROWSING = "content_browsing"
 
 @dataclass
 class MultiHopReasoningChain:
@@ -45,6 +72,103 @@ class MultiHopReasoningChain:
             "difficulty": self.difficulty,
             "required_hops": self.required_hops
         }
+
+@dataclass
+class WebTaskStep:
+    """Represents a single step in a multi-hop web task"""
+    
+    step_id: str
+    step_type: str  # click, input, navigate, extract, etc.
+    target_element_id: str
+    target_page_url: str
+    action_description: str
+    expected_result: str
+    input_data: Dict[str, Any] = field(default_factory=dict)
+    validation_criteria: Dict[str, Any] = field(default_factory=dict)
+    
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert to dictionary for JSON serialization"""
+        return {
+            "step_id": self.step_id,
+            "step_type": self.step_type,
+            "target_element_id": self.target_element_id,
+            "target_page_url": self.target_page_url,
+            "action_description": self.action_description,
+            "expected_result": self.expected_result,
+            "input_data": self.input_data,
+            "validation_criteria": self.validation_criteria
+        }
+
+
+@dataclass
+class WebTaskInstance:
+    """Extended TaskInstance for web-based tasks"""
+    
+    # Basic task fields
+    task_id: str = ""
+    template_id: str = ""
+    task_type: str = ""
+    prompt: str = ""
+    gold_answer: str = ""
+    gold_nodes: List[str] = field(default_factory=list)
+    difficulty: str = ""
+    required_capabilities: List[str] = field(default_factory=list)
+    images: List[str] = field(default_factory=list)
+    image_descriptions: List[str] = field(default_factory=list)
+    
+    # Web-specific fields
+    web_task_type: str = WebTaskType.FORM_FILLING
+    task_steps: List[WebTaskStep] = field(default_factory=list)
+    start_page_url: str = ""
+    target_page_urls: List[str] = field(default_factory=list)
+    required_elements: List[str] = field(default_factory=list)
+    
+    # User behavior modeling
+    user_intent: str = ""
+    user_context: Dict[str, Any] = field(default_factory=dict)
+    expected_duration: int = 0  # seconds
+    
+    # Task complexity
+    hop_count: int = 1
+    interaction_count: int = 0
+    data_extraction_count: int = 0
+    
+    # Quality assessment fields
+    quality_score: Optional[float] = None
+    quality_details: Dict[str, float] = field(default_factory=dict)
+    quality_reasoning: Optional[str] = None
+    passed_quality_check: bool = True
+    
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert to dictionary"""
+        return {
+            "task_id": self.task_id,
+            "template_id": self.template_id,
+            "task_type": self.task_type,
+            "prompt": self.prompt,
+            "gold_answer": self.gold_answer,
+            "gold_nodes": self.gold_nodes,
+            "difficulty": self.difficulty,
+            "required_capabilities": self.required_capabilities,
+            "images": self.images,
+            "image_descriptions": self.image_descriptions,
+            "web_task_type": self.web_task_type,
+            "task_steps": [step.to_dict() if hasattr(step, 'to_dict') else step for step in self.task_steps],
+            "start_page_url": self.start_page_url,
+            "target_page_urls": self.target_page_urls,
+            "required_elements": self.required_elements,
+            "user_intent": self.user_intent,
+            "user_context": self.user_context,
+            "expected_duration": self.expected_duration,
+            "hop_count": self.hop_count,
+            "interaction_count": self.interaction_count,
+            "data_extraction_count": self.data_extraction_count,
+            "quality_score": self.quality_score,
+            "quality_details": self.quality_details,
+            "quality_reasoning": self.quality_reasoning,
+            "passed_quality_check": self.passed_quality_check
+        }
+
 
 @dataclass
 class MultiHopTaskConfig:
@@ -329,11 +453,13 @@ class TaskGenerator:
     def __init__(self, 
                  template_library: Optional[TaskTemplateLibrary] = None,
                  config: Optional[TaskGenerationConfig] = None,
-                 llm_executor: Optional[Any] = None):
+                 llm_executor: Optional[Any] = None,
+                 current_run_dir: Optional[str] = None):
         self.template_library = template_library or DEFAULT_TEMPLATE_LIBRARY
         self.config = config or TaskGenerationConfig()
         self.subgraph_sampler = SubgraphSampler(config=SamplingConfig.from_config())
         self.llm_executor = llm_executor
+        self.current_run_dir = current_run_dir
         
         # Initialize multi-hop task configuration
         self.multi_hop_config = MultiHopTaskConfig.from_config()
@@ -644,12 +770,20 @@ Quality Control Applied:
             template, subgraph_nodes, subgraph_edges, variables
         )
         
-        # Extract image paths from figure nodes
+        # Extract image paths from figure nodes and update to current run directory
         images = []
         image_descriptions = []
         for node in subgraph_nodes:
             if node.node_type == NodeType.FIGURE and node.metadata and 'image_path' in node.metadata:
-                images.append(node.metadata['image_path'])
+                old_path = node.metadata['image_path']
+                if self.current_run_dir:
+                    # Extract filename from old path
+                    filename = Path(old_path).name
+                    # Create new path in current run directory
+                    new_path = f"{self.current_run_dir}/file_images/{filename}"
+                    images.append(new_path)
+                else:
+                    images.append(old_path)
                 image_descriptions.append(node.content)
         
         # Create task instance
@@ -705,12 +839,20 @@ Quality Control Applied:
                 template, subgraph_nodes, subgraph_edges, variables
             )
             
-            # Extract image paths from figure nodes
+            # Extract image paths from figure nodes and update to current run directory
             images = []
             image_descriptions = []
             for node in subgraph_nodes:
                 if node.node_type == NodeType.FIGURE and node.metadata and 'image_path' in node.metadata:
-                    images.append(node.metadata['image_path'])
+                    old_path = node.metadata['image_path']
+                    if self.current_run_dir:
+                        # Extract filename from old path
+                        filename = Path(old_path).name
+                        # Create new path in current run directory
+                        new_path = f"{self.current_run_dir}/file_images/{filename}"
+                        images.append(new_path)
+                    else:
+                        images.append(old_path)
                     image_descriptions.append(node.content)
             
             # Create task instance
@@ -2658,12 +2800,20 @@ Calculate overall_score as: (clarity*0.25 + relevance*0.25 + difficulty*0.3 + co
                 logger.warning(f"LLM failed to generate multi-hop task for {reasoning_type}")
                 return None
             
-            # Extract image paths from figure nodes in all_nodes
+            # Extract image paths from figure nodes in all_nodes and update to current run directory
             images = []
             image_descriptions = []
             for node in all_nodes:
                 if node.node_type == NodeType.FIGURE and node.metadata and 'image_path' in node.metadata:
-                    images.append(node.metadata['image_path'])
+                    old_path = node.metadata['image_path']
+                    if self.current_run_dir:
+                        # Extract filename from old path
+                        filename = Path(old_path).name
+                        # Create new path in current run directory
+                        new_path = f"{self.current_run_dir}/file_images/{filename}"
+                        images.append(new_path)
+                    else:
+                        images.append(old_path)
                     image_descriptions.append(node.content)
             
             # Create task instance
@@ -3350,4 +3500,1631 @@ Please output strictly according to the JSON format above, without any additiona
         
         return f"Information from {', '.join(source_types)}"
     
+    # Web Task Generation Methods
+    def generate_web_tasks(self, web_graph: DocumentGraph, num_tasks: int = 50) -> List[WebTaskInstance]:
+        """Generate multi-hop web tasks from web interaction graph with quality assessment"""
+        
+        if not WEB_AGENT_AVAILABLE:
+            logger.warning("Web Agent not available, cannot generate web tasks")
+            return []
+        
+        logger.info(f"Generating {num_tasks} web tasks from graph with {web_graph.stats['total_nodes']} nodes")
+        
+        # Get web pages and elements
+        web_pages = self._get_web_pages(web_graph)
+        web_elements = self._get_web_elements(web_graph)
+        
+        if not web_pages:
+            logger.warning("No web pages found in graph")
+            return []
+        
+        # Use LLM to analyze web graph and generate tasks
+        tasks = self._generate_web_tasks_with_llm(web_pages, web_elements, web_graph, num_tasks)
+        
+        # Apply quality assessment and filtering
+        tasks = self._assess_and_filter_web_tasks(tasks)
+        
+        # Generate quality report
+        self._generate_web_task_quality_report(tasks)
+        
+        logger.info(f"Generated {len(tasks)} high-quality web tasks after filtering")
+        return tasks
+    
+    def _generate_web_tasks_with_llm(self, web_pages: List[WebPageNode], web_elements: List[WebElementNode], 
+                                   web_graph: DocumentGraph, num_tasks: int) -> List[WebTaskInstance]:
+        """Generate web tasks using LLM analysis of the web graph - one task at a time"""
+        
+        tasks = []
+        
+        try:
+            # Prepare web graph data for LLM analysis
+            graph_data = self._prepare_web_graph_for_llm(web_pages, web_elements, web_graph)
+            
+            # Generate tasks one by one
+            for i in range(num_tasks):
+                try:
+                    logger.info(f"Generating web task {i+1}/{num_tasks}")
+                    
+                    # Create prompt for single task generation
+                    prompt = self._create_single_web_task_prompt(graph_data, i+1, num_tasks)
+                    
+                    # Generate single task using LLM
+                    response = self.llm_executor.execute_simple(prompt)
+                    
+                    # Parse single task from response
+                    task = self._parse_single_web_task_response(response, web_pages, web_elements, i+1)
+                    
+                    if task:
+                        tasks.append(task)
+                        logger.info(f"Successfully generated task {i+1}: {task.web_task_type}")
+                    else:
+                        logger.warning(f"Failed to generate task {i+1}")
+                    
+                    # Add small delay between requests to avoid rate limiting
+                    import time
+                    time.sleep(0.5)
+                    
+                except Exception as e:
+                    logger.error(f"Error generating task {i+1}: {e}")
+                    continue
+            
+            logger.info(f"Generated {len(tasks)} web tasks out of {num_tasks} requested")
+            return tasks
+            
+        except Exception as e:
+            logger.error(f"Error in web task generation: {e}")
+            # Fallback to simple rule-based generation
+            return self._generate_web_tasks_fallback(web_pages, web_elements, web_graph, num_tasks)
+    
+    def _prepare_web_graph_for_llm(self, web_pages: List[WebPageNode], web_elements: List[WebElementNode], 
+                                 web_graph: DocumentGraph) -> Dict[str, Any]:
+        """Prepare web graph data for LLM analysis"""
+        
+        graph_data = {
+            "pages": [],
+            "elements": [],
+            "relationships": [],
+            "graph_stats": web_graph.stats
+        }
+        
+        # Add page information
+        for page in web_pages:
+            page_data = {
+                "url": page.url,
+                "title": page.title,
+                "page_type": page.page_type,
+                "load_time": page.load_time,
+                "page_size": page.page_size
+            }
+            graph_data["pages"].append(page_data)
+        
+        # Add element information
+        for element in web_elements:
+            element_data = {
+                "element_id": element.node_id,
+                "element_type": element.element_type,
+                "tag_name": element.tag_name,
+                "text_content": element.text_content,
+                "placeholder": element.placeholder,
+                "href": element.href,
+                "is_clickable": element.is_clickable,
+                "is_input": element.is_input,
+                "input_type": element.input_type,
+                "source_page": element.source_file
+            }
+            graph_data["elements"].append(element_data)
+        
+        # Add relationships (edges)
+        for edge in web_graph.storage.edges.values():
+            edge_data = {
+                "source": edge.source_node_id,
+                "target": edge.target_node_id,
+                "edge_type": edge.edge_type,
+                "properties": edge.metadata
+            }
+            graph_data["relationships"].append(edge_data)
+        
+        return graph_data
+    
+    def _group_pages_by_depth(self, pages: List[Dict[str, Any]]) -> Dict[int, List[Dict[str, Any]]]:
+        """Group pages by their exploration depth"""
+        pages_by_depth = {}
+        for page in pages:
+            depth = page.get('exploration_depth', 0)
+            if depth not in pages_by_depth:
+                pages_by_depth[depth] = []
+            pages_by_depth[depth].append(page)
+        return pages_by_depth
+    
+    def _analyze_cross_page_relationships(self, relationships: List[Dict[str, Any]]) -> Dict[str, List[str]]:
+        """Analyze relationships between pages across different depths"""
+        cross_page_rels = {}
+        for rel in relationships:
+            source = rel.get('source', '')
+            target = rel.get('target', '')
+            if source and target:
+                if source not in cross_page_rels:
+                    cross_page_rels[source] = []
+                cross_page_rels[source].append(target)
+        return cross_page_rels
+    
+    def _format_exploration_structure(self, pages_by_depth: Dict[int, List[Dict[str, Any]]]) -> str:
+        """Format the exploration structure for the prompt"""
+        structure = "Exploration Depth Structure:\n"
+        for depth in sorted(pages_by_depth.keys()):
+            pages = pages_by_depth[depth]
+            structure += f"  Depth {depth}: {len(pages)} pages\n"
+            for page in pages[:3]:  # Show first 3 pages per depth
+                structure += f"    - {page.get('url', 'N/A')} ({page.get('page_type', 'unknown')})\n"
+            if len(pages) > 3:
+                structure += f"    ... and {len(pages) - 3} more pages\n"
+        return structure
+    
+    def _format_cross_page_relationships(self, cross_page_rels: Dict[str, List[str]]) -> str:
+        """Format cross-page relationships for the prompt"""
+        if not cross_page_rels:
+            return "Cross-page Relationships: None found\n"
+        
+        rels = "Cross-page Relationships:\n"
+        for source, targets in list(cross_page_rels.items())[:5]:  # Show first 5 relationships
+            rels += f"  {source} -> {', '.join(targets[:3])}\n"
+            if len(targets) > 3:
+                rels += f"    ... and {len(targets) - 3} more targets\n"
+        return rels
+    
+    def _format_elements_by_page_for_prompt(self, elements: List[Dict[str, Any]], pages: List[Dict[str, Any]]) -> str:
+        """Format elements grouped by page for the prompt"""
+        elements_by_page = {}
+        for element in elements:
+            source_page = element.get('source_page', 'unknown')
+            if source_page not in elements_by_page:
+                elements_by_page[source_page] = []
+            elements_by_page[source_page].append(element)
+        
+        formatted = "Available Elements by Page:\n"
+        for page in pages[:5]:  # Show first 5 pages
+            page_url = page.get('url', 'unknown')
+            page_elements = elements_by_page.get(page_url, [])
+            formatted += f"  {page_url}:\n"
+            for element in page_elements[:3]:  # Show first 3 elements per page
+                formatted += f"    - {element.get('element_type', 'unknown')}: {element.get('text_content', '')[:30]}...\n"
+            if len(page_elements) > 3:
+                formatted += f"    ... and {len(page_elements) - 3} more elements\n"
+        return formatted
+    
+    def _create_web_task_generation_prompt(self, graph_data: Dict[str, Any], num_tasks: int) -> str:
+        """Create LLM prompt for web task generation"""
+        
+        prompt = f"""You are an expert web task generator. Analyze the provided web graph and generate realistic web interaction tasks.
 
+Web Graph Data:
+- Pages: {len(graph_data['pages'])} pages
+- Elements: {len(graph_data['elements'])} interactive elements
+- Relationships: {len(graph_data['relationships'])} connections
+
+Pages:
+"""
+        
+        for i, page in enumerate(graph_data['pages'], 1):
+            prompt += f"{i}. {page['url']} - {page['title']} ({page['page_type']})\n"
+        
+        prompt += f"""
+Interactive Elements:
+"""
+        
+        for i, element in enumerate(graph_data['elements'][:10], 1):  # Show first 10 elements
+            prompt += f"{i}. {element['element_type']} - {element['text_content'][:50]}... (clickable: {element['is_clickable']}, input: {element['is_input']})\n"
+        
+        if len(graph_data['elements']) > 10:
+            prompt += f"... and {len(graph_data['elements']) - 10} more elements\n"
+        
+        prompt += f"""
+Relationships:
+"""
+        
+        for edge in graph_data['relationships'][:5]:  # Show first 5 relationships
+            prompt += f"- {edge['source']} -> {edge['target']} ({edge['edge_type']})\n"
+        
+        if len(graph_data['relationships']) > 5:
+            prompt += f"... and {len(graph_data['relationships']) - 5} more relationships\n"
+        
+        prompt += f"""
+
+Generate {num_tasks} realistic web interaction tasks based on this graph. Each task should:
+1. Be a realistic user interaction scenario
+2. Include multiple steps (navigation, interaction, data extraction)
+3. Be specific to the available elements and pages
+4. Cover different task types: form filling, search, navigation, data extraction, e-commerce, content browsing
+
+Task Types to Generate:
+- Form Filling: Complete forms, login, registration
+- Search: Search functionality, filtering
+- Navigation: Multi-page navigation, link following
+- Data Extraction: Extract information from pages
+- E-commerce: Product browsing, shopping cart
+- Content Browsing: Reading articles, exploring content
+
+For each task, provide:
+- Task ID: unique identifier
+- Task Type: one of the types above
+- Task Description: clear description of what the user wants to accomplish
+- Difficulty: EASY, MEDIUM, or HARD
+- Steps: list of specific actions to complete the task
+
+Format your response as a JSON array of task objects.
+"""
+        
+        return prompt
+    
+    def _create_single_web_task_prompt(self, graph_data: Dict[str, Any], task_number: int, total_tasks: int) -> str:
+        """Create LLM prompt for generating a single web task with multi-step exploration"""
+        
+        # Analyze exploration depth and page relationships
+        pages_by_depth = self._group_pages_by_depth(graph_data['pages'])
+        cross_page_relationships = self._analyze_cross_page_relationships(graph_data['relationships'])
+        
+        # Define task type distribution to ensure diversity
+        task_types = [
+            "Search", "Form Filling", "Navigation", "Data Extraction", 
+            "E-commerce", "Content Browsing"
+        ]
+        
+        # Assign specific task type based on task number to ensure diversity
+        assigned_task_type = task_types[(task_number - 1) % len(task_types)]
+        
+        prompt = f"""You are an expert web task generator. Generate task {task_number} out of {total_tasks} realistic MULTI-PAGE web interaction tasks based on exploration data.
+
+Web Graph Data:
+- Total Pages: {len(graph_data['pages'])} pages across multiple exploration depths
+- Elements: {len(graph_data['elements'])} interactive elements
+- Cross-page Relationships: {len(graph_data['relationships'])} connections
+
+Page Exploration Structure:
+{self._format_exploration_structure(pages_by_depth)}
+
+Cross-page Relationships:
+{self._format_cross_page_relationships(cross_page_relationships)}
+
+Available Elements by Page:
+{self._format_elements_by_page_for_prompt(graph_data['elements'], graph_data['pages'])}
+
+IMPORTANT: For this task (task {task_number}), you MUST generate a "{assigned_task_type}" type task.
+
+CRITICAL: Your task must be SPECIFIC and CONCRETE based on the actual page content:
+- For Search tasks: Use specific search terms found in page titles, product names, or categories
+- For Navigation tasks: Reference actual page titles, menu items, and section names
+- For Data Extraction tasks: Specify exact information to extract (e.g., "iPhone 15 Pro price", "MacBook Air specifications")
+- For E-commerce tasks: Use actual product names, categories, and filter options
+- For Content Browsing tasks: Reference specific articles, tutorials, or content sections
+- For Form Filling tasks: Use actual form fields and form purposes found on the pages
+
+DO NOT use generic terms like "products", "articles", "information" - be specific!
+
+Generate ONE realistic MULTI-PAGE web interaction task based on this exploration data. The task should:
+1. Be specifically a "{assigned_task_type}" type task
+2. Utilize the exploration depth structure to create meaningful cross-page workflows
+3. Include 3-8 steps that span multiple pages and exploration depths
+4. AVOID sensitive operations like checkout, payment, personal data submission, or financial transactions
+5. Be SPECIFIC and CONCRETE - use actual page titles, product names, categories, and content from the available pages
+6. Focus on common multi-page user behaviors for {assigned_task_type}:
+   - Search: Search with specific terms → filter results → view details → compare options
+   - Form Filling: Start registration → fill forms → complete verification → confirm
+   - Navigation: Browse categories → view details → explore related content → bookmark
+   - Data Extraction: Identify target data → navigate to source → extract information → organize results
+   - E-commerce: Browse products → search/filter → view details → add to cart (NO checkout or payment)
+   - Content Browsing: Read articles → explore related content → save/bookmark → share
+7. Be specific to the available elements and pages across different depths
+8. Be different from previous tasks (if any)
+
+For {assigned_task_type} tasks, use these specific examples:
+- Search: "Search for 'iPhone 15 Pro specifications' and compare with iPhone 14 Pro features"
+- Form Filling: "Complete the newsletter subscription form with email and preferences"
+- Navigation: "Navigate from homepage to Support section and find troubleshooting guides"
+- Data Extraction: "Extract product specifications and pricing from the MacBook Pro product page"
+- E-commerce: "Browse MacBook Air models, filter by M2 chip, and add 13-inch model to cart"
+- Content Browsing: "Read the latest iOS 17 features article and explore related tutorials"
+
+Task Types to Choose From:
+- Form Filling: Complete forms, login, registration
+- Search: Search functionality, filtering (with specific search terms)
+- Navigation: Multi-page navigation, link following
+- Data Extraction: Extract information from pages
+- E-commerce: Product browsing, shopping cart (NO checkout or payment)
+- Content Browsing: Reading articles, exploring content
+
+Provide the task in this exact JSON format:
+{{
+    "task_id": "web_task_{task_number}",
+    "task_type": "{assigned_task_type}",
+    "task_description": "SPECIFIC description using actual page content, product names, search terms, or specific information to extract",
+    "difficulty": "EASY, MEDIUM, or HARD",
+    "steps": [
+        {{
+            "step_description": "specific action to take",
+            "step_type": "navigation, click, input, extract, etc."
+        }},
+        {{
+            "step_description": "next specific action",
+            "step_type": "navigation, click, input, extract, etc."
+        }}
+    ]
+}}
+
+Make sure the JSON is valid and complete.
+"""
+        
+        return prompt
+    
+    def _parse_single_web_task_response(self, response: ExecutionResult, web_pages: List[WebPageNode], 
+                                      web_elements: List[WebElementNode], task_number: int) -> Optional[WebTaskInstance]:
+        """Parse single web task from LLM response"""
+        
+        try:
+            import json
+            import re
+            response_text = response.answer.strip()
+            
+            # Clean the response text
+            if response_text.startswith('```json'):
+                response_text = response_text[7:]
+            if response_text.endswith('```'):
+                response_text = response_text[:-3]
+            
+            response_text = response_text.strip()
+            
+            # Fix common JSON issues
+            response_text = re.sub(r'"task_id"', '"task_id"', response_text)
+            response_text = re.sub(r'"task_type"', '"task_type"', response_text)
+            response_text = re.sub(r'"task_description"', '"task_description"', response_text)
+            response_text = re.sub(r'"difficulty"', '"difficulty"', response_text)
+            response_text = re.sub(r'"steps"', '"steps"', response_text)
+            response_text = re.sub(r'"step_description"', '"step_description"', response_text)
+            response_text = re.sub(r'"step_type"', '"step_type"', response_text)
+            
+            # Remove trailing commas
+            response_text = re.sub(r',(\s*[}\]])', r'\1', response_text)
+            
+            # Parse JSON
+            task_data = json.loads(response_text)
+            
+            # Create task steps
+            task_steps = []
+            for j, step_data in enumerate(task_data.get('steps', []), 1):
+                step = WebTaskStep(
+                    step_id=f"step_{j}",
+                    step_type=step_data.get('step_type', 'navigation'),
+                    target_element_id="",
+                    target_page_url="",
+                    action_description=step_data.get('step_description', ''),
+                    expected_result=f"Completed: {step_data.get('step_description', '')}",
+                    input_data={}
+                )
+                task_steps.append(step)
+            
+            # Create WebTaskInstance
+            task = WebTaskInstance(
+                task_id=task_data.get('task_id', f"web_task_{task_number}"),
+                web_task_type=task_data.get('task_type', 'navigation'),
+                prompt=task_data.get('task_description', 'Web interaction task'),
+                difficulty=task_data.get('difficulty', 'MEDIUM'),
+                task_steps=task_steps,
+                required_capabilities=["web_navigation", "web_interaction"],
+                expected_duration=len(task_steps) * 30,
+                user_intent=task_data.get('task_description', 'Web interaction task')
+            )
+            
+            return task
+            
+        except Exception as e:
+            logger.error(f"Error parsing single web task response: {e}")
+            logger.debug(f"Response text: {response.answer}")
+            return None
+    
+    def _parse_llm_web_tasks_response(self, response: ExecutionResult, web_pages: List[WebPageNode], 
+                                    web_elements: List[WebElementNode]) -> List[WebTaskInstance]:
+        """Parse LLM response to extract web tasks"""
+        
+        tasks = []
+        
+        try:
+            # Try to parse JSON response
+            import json
+            import re
+            response_text = response.answer.strip()
+            
+            # Clean the response text (remove markdown code blocks if present)
+            if response_text.startswith('```json'):
+                response_text = response_text[7:]
+            if response_text.endswith('```'):
+                response_text = response_text[:-3]
+            
+            response_text = response_text.strip()
+            
+            # Fix common JSON issues
+            # 1. Fix property names with spaces (e.g., "Task ID" -> "task_id")
+            response_text = re.sub(r'"Task ID"', '"task_id"', response_text)
+            response_text = re.sub(r'"Task Type"', '"task_type"', response_text)
+            response_text = re.sub(r'"Task Description"', '"task_description"', response_text)
+            response_text = re.sub(r'"Difficulty"', '"difficulty"', response_text)
+            response_text = re.sub(r'"Steps"', '"steps"', response_text)
+            
+            # 2. Convert steps array to proper format
+            response_text = re.sub(r'"Steps": \[([^\]]+)\]', r'"steps": [{"step_description": "\1"}]', response_text)
+            
+            # 3. Remove trailing commas
+            response_text = re.sub(r',(\s*[}\]])', r'\1', response_text)
+            
+            # Parse JSON
+            task_data = json.loads(response_text)
+            
+            if isinstance(task_data, list):
+                for i, task_info in enumerate(task_data):
+                    try:
+                        task = self._create_web_task_from_llm_response(task_info, web_pages, web_elements, i)
+                        if task:
+                            tasks.append(task)
+                    except Exception as e:
+                        logger.warning(f"Error creating task from LLM response: {e}")
+                        continue
+            
+        except Exception as e:
+            logger.error(f"Error parsing LLM web tasks response: {e}")
+            logger.debug(f"Response text: {response.answer}")
+            
+            # Try to extract tasks manually from the response
+            tasks = self._extract_tasks_manually(response.answer, web_pages, web_elements)
+        
+        return tasks
+    
+    def _extract_tasks_manually(self, response_text: str, web_pages: List[WebPageNode], 
+                              web_elements: List[WebElementNode]) -> List[WebTaskInstance]:
+        """Manually extract tasks from LLM response when JSON parsing fails"""
+        
+        tasks = []
+        
+        try:
+            # Split by task blocks
+            task_blocks = response_text.split('"Task ID":')
+            
+            for i, block in enumerate(task_blocks[1:], 1):  # Skip first empty block
+                try:
+                    # Extract task information using regex
+                    import re
+                    
+                    # Extract task type
+                    task_type_match = re.search(r'"Task Type":\s*"([^"]+)"', block)
+                    task_type = task_type_match.group(1).lower() if task_type_match else "navigation"
+                    
+                    # Extract description
+                    desc_match = re.search(r'"Task Description":\s*"([^"]+)"', block)
+                    description = desc_match.group(1) if desc_match else f"Web task {i}"
+                    
+                    # Extract difficulty
+                    diff_match = re.search(r'"Difficulty":\s*"([^"]+)"', block)
+                    difficulty = diff_match.group(1) if diff_match else "MEDIUM"
+                    
+                    # Extract steps
+                    steps_match = re.search(r'"Steps":\s*\[(.*?)\]', block, re.DOTALL)
+                    steps = []
+                    if steps_match:
+                        steps_text = steps_match.group(1)
+                        # Split by quotes and extract step descriptions
+                        step_matches = re.findall(r'"([^"]+)"', steps_text)
+                        for j, step_desc in enumerate(step_matches, 1):
+                            step = WebTaskStep(
+                                step_id=f"step_{j}",
+                                step_type="navigation",
+                                target_element_id="",
+                                target_page_url="",
+                                action_description=step_desc,
+                                expected_result=f"Completed: {step_desc}",
+                                input_data={}
+                            )
+                            steps.append(step)
+                    
+                    # Create task
+                    task = WebTaskInstance(
+                        task_id=f"web_task_{i}",
+                        web_task_type=task_type,
+                        prompt=description,
+                        difficulty=difficulty,
+                        task_steps=steps,
+                        required_capabilities=["web_navigation", "web_interaction"],
+                        expected_duration=len(steps) * 30,
+                        user_intent=description
+                    )
+                    
+                    tasks.append(task)
+                    
+                except Exception as e:
+                    logger.warning(f"Error extracting task {i} manually: {e}")
+                    continue
+            
+        except Exception as e:
+            logger.error(f"Error in manual task extraction: {e}")
+        
+        return tasks
+    
+    def _create_web_task_from_llm_response(self, task_info: Dict[str, Any], web_pages: List[WebPageNode], 
+                                         web_elements: List[WebElementNode], task_index: int) -> Optional[WebTaskInstance]:
+        """Create a WebTaskInstance from LLM response data"""
+        
+        try:
+            # Extract task information
+            task_id = task_info.get('task_id', f"web_task_{task_index}")
+            task_type = task_info.get('task_type', 'navigation')
+            description = task_info.get('task_description', 'Web interaction task')
+            difficulty = task_info.get('difficulty', 'MEDIUM')
+            steps_data = task_info.get('steps', [])
+            
+            # Create task steps
+            task_steps = []
+            for j, step_data in enumerate(steps_data):
+                step = WebTaskStep(
+                    step_id=f"step_{j+1}",
+                    step_type=step_data.get('step_type', 'navigation'),
+                    target_element_id=step_data.get('target_element_id', ''),
+                    target_page_url=step_data.get('target_page_url', ''),
+                    action_description=step_data.get('action_description', ''),
+                    expected_result=step_data.get('expected_result', ''),
+                    input_data=step_data.get('input_data', {})
+                )
+                task_steps.append(step)
+            
+            # Create WebTaskInstance
+            task = WebTaskInstance(
+                task_id=task_id,
+                web_task_type=task_type,
+                prompt=description,  # Use prompt instead of task_description
+                difficulty=difficulty,
+                task_steps=task_steps,
+                required_capabilities=["web_navigation", "web_interaction"],
+                expected_duration=len(task_steps) * 30,  # 30 seconds per step
+                user_intent=description
+            )
+            
+            return task
+            
+        except Exception as e:
+            logger.warning(f"Error creating web task from LLM data: {e}")
+            return None
+    
+    def _generate_web_tasks_fallback(self, web_pages: List[WebPageNode], web_elements: List[WebElementNode], 
+                                   web_graph: DocumentGraph, num_tasks: int) -> List[WebTaskInstance]:
+        """Fallback method for web task generation when LLM fails"""
+        
+        logger.info("Using fallback web task generation")
+        
+        tasks = []
+        
+        # Generate simple navigation tasks
+        for i, page in enumerate(web_pages[:num_tasks]):
+            task = WebTaskInstance(
+                task_id=f"fallback_task_{i+1}",
+                web_task_type="navigation",
+                prompt=f"Navigate to {page.url}",
+                difficulty="EASY",
+                task_steps=[
+                    WebTaskStep(
+                        step_id="step_1",
+                        step_type="navigation",
+                        target_element_id="",
+                        target_page_url=page.url,
+                        action_description=f"Navigate to {page.url}",
+                        expected_result=f"Successfully loaded {page.url}",
+                        input_data={}
+                    )
+                ],
+                required_capabilities=["web_navigation"],
+                expected_duration=30,
+                user_intent=f"Navigate to {page.url}"
+            )
+            tasks.append(task)
+        
+        return tasks
+    
+    def _assess_and_filter_web_tasks(self, tasks: List[WebTaskInstance]) -> List[WebTaskInstance]:
+        """Assess and filter web tasks based on quality criteria"""
+        
+        if not tasks:
+            return tasks
+        
+        logger.info(f"Assessing quality of {len(tasks)} web tasks")
+        
+        # Apply quality assessment to each task
+        for task in tasks:
+            self._assess_web_task_quality(task)
+        
+        # Filter tasks based on quality criteria
+        filtered_tasks = self._filter_web_tasks_by_quality(tasks)
+        
+        # Remove duplicates
+        filtered_tasks = self._remove_duplicate_web_tasks(filtered_tasks)
+        
+        logger.info(f"Quality filtering: {len(tasks)} -> {len(filtered_tasks)} tasks")
+        return filtered_tasks
+    
+    def _assess_web_task_quality(self, task: WebTaskInstance):
+        """Assess the quality of a web task using multiple criteria"""
+        
+        quality_scores = {}
+        
+        # 1. Task Completeness Score (25%)
+        completeness_score = self._calculate_web_task_completeness(task)
+        quality_scores['completeness'] = completeness_score
+        
+        # 2. Task Realism Score (25%)
+        realism_score = self._calculate_web_task_realism(task)
+        quality_scores['realism'] = realism_score
+        
+        # 3. Task Complexity Score (20%)
+        complexity_score = self._calculate_web_task_complexity(task)
+        quality_scores['complexity'] = complexity_score
+        
+        # 4. Task Specificity Score (15%)
+        specificity_score = self._calculate_web_task_specificity(task)
+        quality_scores['specificity'] = specificity_score
+        
+        # 5. Task Feasibility Score (15%)
+        feasibility_score = self._calculate_web_task_feasibility(task)
+        quality_scores['feasibility'] = feasibility_score
+        
+        # Calculate overall quality score
+        overall_score = (
+            completeness_score * 0.25 +
+            realism_score * 0.25 +
+            complexity_score * 0.20 +
+            specificity_score * 0.15 +
+            feasibility_score * 0.15
+        )
+        
+        # Store quality information in task
+        task.quality_score = overall_score
+        task.quality_details = quality_scores
+        task.passed_quality_check = overall_score >= 0.6  # Minimum quality threshold
+        
+        # Add quality reasoning
+        task.quality_reasoning = self._generate_web_task_quality_reasoning(task, quality_scores)
+    
+    def _calculate_web_task_completeness(self, task: WebTaskInstance) -> float:
+        """Calculate completeness score for web task"""
+        score = 0.0
+        
+        # Check if task has essential components
+        if task.prompt and len(task.prompt.strip()) > 10:
+            score += 0.3
+        
+        if task.task_steps and len(task.task_steps) >= 2:
+            score += 0.3
+        
+        if task.web_task_type and task.web_task_type != "":
+            score += 0.2
+        
+        if task.difficulty and task.difficulty != "":
+            score += 0.2
+        
+        return min(score, 1.0)
+    
+    def _calculate_web_task_realism(self, task: WebTaskInstance) -> float:
+        """Calculate realism score for web task"""
+        score = 0.0
+        
+        # Check if task describes realistic user behavior
+        realistic_keywords = [
+            'search', 'browse', 'click', 'navigate', 'fill', 'submit', 'select',
+            'compare', 'read', 'view', 'add', 'remove', 'filter', 'sort'
+        ]
+        
+        prompt_lower = task.prompt.lower()
+        realistic_count = sum(1 for keyword in realistic_keywords if keyword in prompt_lower)
+        score += min(realistic_count / 3, 0.4)  # Max 0.4 for realistic keywords
+        
+        # Check if task steps are realistic
+        if task.task_steps:
+            realistic_steps = 0
+            for step in task.task_steps:
+                step_lower = step.action_description.lower()
+                if any(keyword in step_lower for keyword in realistic_keywords):
+                    realistic_steps += 1
+            
+            step_realism = realistic_steps / len(task.task_steps) if task.task_steps else 0
+            score += step_realism * 0.4
+        
+        # Check if task type is appropriate
+        valid_task_types = [
+            'form_filling', 'search_filter', 'navigation_task', 'data_extraction',
+            'e_commerce_purchase', 'content_browsing', 'information_aggregation'
+        ]
+        if task.web_task_type in valid_task_types:
+            score += 0.2
+        
+        return min(score, 1.0)
+    
+    def _calculate_web_task_complexity(self, task: WebTaskInstance) -> float:
+        """Calculate complexity score for web task"""
+        score = 0.0
+        
+        # Base complexity on number of steps
+        if task.task_steps:
+            step_count = len(task.task_steps)
+            if step_count >= 5:
+                score += 0.4  # High complexity
+            elif step_count >= 3:
+                score += 0.3  # Medium complexity
+            elif step_count >= 2:
+                score += 0.2  # Low complexity
+            else:
+                score += 0.1  # Very low complexity
+        
+        # Check for different step types (diversity)
+        if task.task_steps:
+            step_types = set(step.step_type for step in task.task_steps)
+            diversity_score = min(len(step_types) / 4, 0.3)  # Max 0.3 for diversity
+            score += diversity_score
+        
+        # Check difficulty level
+        if task.difficulty == "HARD":
+            score += 0.2
+        elif task.difficulty == "MEDIUM":
+            score += 0.15
+        elif task.difficulty == "EASY":
+            score += 0.1
+        
+        # Check for cross-page elements
+        if hasattr(task, 'hop_count') and task.hop_count > 1:
+            score += 0.1
+        
+        return min(score, 1.0)
+    
+    def _calculate_web_task_specificity(self, task: WebTaskInstance) -> float:
+        """Calculate specificity score for web task"""
+        score = 0.0
+        
+        # Check if task has specific actions
+        specific_keywords = [
+            'click on', 'enter', 'select', 'navigate to', 'search for',
+            'fill out', 'submit', 'browse', 'compare', 'extract'
+        ]
+        
+        prompt_lower = task.prompt.lower()
+        specific_count = sum(1 for keyword in specific_keywords if keyword in prompt_lower)
+        score += min(specific_count / 2, 0.4)  # Max 0.4 for specific keywords
+        
+        # Check if task steps are specific
+        if task.task_steps:
+            specific_steps = 0
+            for step in task.task_steps:
+                step_lower = step.action_description.lower()
+                if any(keyword in step_lower for keyword in specific_keywords):
+                    specific_steps += 1
+            
+            step_specificity = specific_steps / len(task.task_steps) if task.task_steps else 0
+            score += step_specificity * 0.4
+        
+        # Check if task has clear target elements or pages
+        if hasattr(task, 'target_page_urls') and task.target_page_urls:
+            score += 0.2
+        
+        return min(score, 1.0)
+    
+    def _calculate_web_task_feasibility(self, task: WebTaskInstance) -> float:
+        """Calculate feasibility score for web task"""
+        score = 0.0
+        
+        # Check if task has reasonable number of steps
+        if task.task_steps:
+            step_count = len(task.task_steps)
+            if 2 <= step_count <= 8:
+                score += 0.3  # Reasonable step count
+            elif step_count <= 10:
+                score += 0.2  # Acceptable step count
+            else:
+                score += 0.1  # Too many steps
+        
+        # Check if task steps are actionable
+        if task.task_steps:
+            actionable_steps = 0
+            for step in task.task_steps:
+                if step.action_description and len(step.action_description.strip()) > 5:
+                    actionable_steps += 1
+            
+            actionability = actionable_steps / len(task.task_steps) if task.task_steps else 0
+            score += actionability * 0.3
+        
+        # Check if task has reasonable expected duration
+        if hasattr(task, 'expected_duration') and task.expected_duration:
+            if 30 <= task.expected_duration <= 600:  # 30 seconds to 10 minutes
+                score += 0.2
+            elif task.expected_duration <= 1200:  # Up to 20 minutes
+                score += 0.1
+            else:
+                score += 0.05
+        
+        # Check if task type is feasible
+        feasible_types = [
+            'form_filling', 'search_filter', 'navigation_task', 'data_extraction',
+            'content_browsing', 'information_aggregation'
+        ]
+        if task.web_task_type in feasible_types:
+            score += 0.2
+        
+        return min(score, 1.0)
+    
+    def _generate_web_task_quality_reasoning(self, task: WebTaskInstance, quality_scores: Dict[str, float]) -> str:
+        """Generate reasoning for web task quality assessment"""
+        
+        reasoning_parts = []
+        
+        # Overall assessment
+        overall_score = task.quality_score
+        if overall_score >= 0.8:
+            reasoning_parts.append("High-quality web task with comprehensive requirements")
+        elif overall_score >= 0.6:
+            reasoning_parts.append("Good-quality web task with clear objectives")
+        else:
+            reasoning_parts.append("Basic web task that needs improvement")
+        
+        # Specific feedback
+        if quality_scores.get('completeness', 0) < 0.7:
+            reasoning_parts.append("Task lacks some essential components")
+        
+        if quality_scores.get('realism', 0) < 0.6:
+            reasoning_parts.append("Task could be more realistic")
+        
+        if quality_scores.get('complexity', 0) < 0.4:
+            reasoning_parts.append("Task is too simple")
+        
+        if quality_scores.get('specificity', 0) < 0.5:
+            reasoning_parts.append("Task needs more specific actions")
+        
+        if quality_scores.get('feasibility', 0) < 0.6:
+            reasoning_parts.append("Task may be difficult to execute")
+        
+        return "; ".join(reasoning_parts)
+    
+    def _filter_web_tasks_by_quality(self, tasks: List[WebTaskInstance]) -> List[WebTaskInstance]:
+        """Filter web tasks based on quality criteria"""
+        
+        if not tasks:
+            return tasks
+        
+        filtered_tasks = []
+        
+        for task in tasks:
+            # Check if task passed quality check
+            if not task.passed_quality_check:
+                logger.debug(f"Task {task.task_id}: Filtered out - failed quality check (score: {task.quality_score:.3f})")
+                continue
+            
+            # Check minimum quality threshold
+            if task.quality_score < 0.6:
+                logger.debug(f"Task {task.task_id}: Filtered out - quality score too low ({task.quality_score:.3f})")
+                continue
+            
+            # Check minimum task steps
+            if not task.task_steps or len(task.task_steps) < 2:
+                logger.debug(f"Task {task.task_id}: Filtered out - insufficient task steps")
+                continue
+            
+            # Check if task has meaningful prompt
+            if not task.prompt or len(task.prompt.strip()) < 20:
+                logger.debug(f"Task {task.task_id}: Filtered out - prompt too short")
+                continue
+            
+            filtered_tasks.append(task)
+        
+        return filtered_tasks
+    
+    def _remove_duplicate_web_tasks(self, tasks: List[WebTaskInstance]) -> List[WebTaskInstance]:
+        """Remove duplicate web tasks"""
+        
+        if not tasks:
+            return tasks
+        
+        unique_tasks = []
+        seen_prompts = set()
+        seen_task_signatures = set()
+        
+        for task in tasks:
+            # Normalize prompt for comparison
+            normalized_prompt = self._normalize_web_task_prompt(task.prompt)
+            
+            # Check for exact prompt duplicates
+            if normalized_prompt in seen_prompts:
+                logger.debug(f"Removing exact duplicate task: {task.task_id}")
+                continue
+            
+            # Check for semantic duplicates
+            task_signature = self._generate_web_task_signature(task)
+            if task_signature in seen_task_signatures:
+                logger.debug(f"Removing semantic duplicate task: {task.task_id}")
+                continue
+            
+            seen_prompts.add(normalized_prompt)
+            seen_task_signatures.add(task_signature)
+            unique_tasks.append(task)
+        
+        return unique_tasks
+    
+    def _normalize_web_task_prompt(self, prompt: str) -> str:
+        """Normalize web task prompt for duplicate detection"""
+        # Convert to lowercase and remove extra whitespace
+        normalized = prompt.lower().strip()
+        
+        # Remove punctuation and common variations
+        import re
+        normalized = re.sub(r'[^\w\s]', '', normalized)
+        normalized = re.sub(r'\s+', ' ', normalized)
+        
+        return normalized
+    
+    def _generate_web_task_signature(self, task: WebTaskInstance) -> str:
+        """Generate signature for web task similarity detection"""
+        
+        components = []
+        
+        # Task type and difficulty
+        components.append(f"{task.web_task_type}_{task.difficulty}")
+        
+        # Key terms from prompt (first 5 significant words)
+        prompt_words = [word for word in task.prompt.lower().split() if len(word) > 3]
+        components.extend(prompt_words[:5])
+        
+        # Step types
+        if task.task_steps:
+            step_types = [step.step_type for step in task.task_steps]
+            components.extend(step_types[:3])
+        
+        # Task complexity indicators
+        if hasattr(task, 'hop_count'):
+            components.append(f"hops_{task.hop_count}")
+        
+        if hasattr(task, 'interaction_count'):
+            components.append(f"interactions_{task.interaction_count}")
+        
+        return "_".join(components)
+    
+    def _generate_web_task_quality_report(self, tasks: List[WebTaskInstance]):
+        """Generate and log quality report for web tasks"""
+        
+        if not tasks:
+            logger.info("No web tasks generated for quality report")
+            return
+        
+        # Calculate quality metrics
+        total_tasks = len(tasks)
+        task_types = {}
+        difficulties = {}
+        avg_complexity = 0.0
+        avg_prompt_length = 0.0
+        
+        # Quality score statistics
+        quality_scores = []
+        passed_quality_check = 0
+        failed_quality_check = 0
+        
+        # Detailed quality metrics
+        quality_details = {
+            'completeness': [],
+            'realism': [],
+            'complexity': [],
+            'specificity': [],
+            'feasibility': []
+        }
+        
+        for task in tasks:
+            # Task type distribution
+            task_type = task.web_task_type
+            task_types[task_type] = task_types.get(task_type, 0) + 1
+            
+            # Difficulty distribution
+            difficulty = task.difficulty
+            difficulties[difficulty] = difficulties.get(difficulty, 0) + 1
+            
+            # Complexity analysis
+            complexity = len(task.task_steps) if task.task_steps else 0
+            avg_complexity += complexity
+            
+            # Prompt length
+            avg_prompt_length += len(task.prompt)
+            
+            # Quality score statistics
+            if task.quality_score is not None:
+                quality_scores.append(task.quality_score)
+            
+            # Quality check pass/fail statistics
+            if task.passed_quality_check:
+                passed_quality_check += 1
+            else:
+                failed_quality_check += 1
+            
+            # Detailed quality metrics
+            if task.quality_details:
+                for key in quality_details:
+                    if key in task.quality_details:
+                        quality_details[key].append(task.quality_details[key])
+        
+        avg_complexity /= total_tasks
+        avg_prompt_length /= total_tasks
+        
+        # Quality score statistics
+        avg_quality_score = sum(quality_scores) / len(quality_scores) if quality_scores else 0.0
+        min_quality_score = min(quality_scores) if quality_scores else 0.0
+        max_quality_score = max(quality_scores) if quality_scores else 0.0
+        
+        # Detailed quality averages
+        avg_quality_details = {}
+        for key, scores in quality_details.items():
+            avg_quality_details[key] = sum(scores) / len(scores) if scores else 0.0
+        
+        # Generate report
+        report = f"""
+=== Web Task Generation Quality Report ===
+Total Web Tasks Generated: {total_tasks}
+
+Web Task Type Distribution:
+{chr(10).join([f"  {task_type}: {count} ({count/total_tasks*100:.1f}%)" for task_type, count in task_types.items()])}
+
+Difficulty Distribution:
+{chr(10).join([f"  {difficulty}: {count} ({count/total_tasks*100:.1f}%)" for difficulty, count in difficulties.items()])}
+
+Quality Assessment Results:
+  Tasks with Quality Scores: {len(quality_scores)}/{total_tasks}
+  Average Quality Score: {avg_quality_score:.3f}
+  Quality Score Range: {min_quality_score:.3f} - {max_quality_score:.3f}
+  Tasks Passed Quality Check: {passed_quality_check}/{total_tasks} ({passed_quality_check/total_tasks*100:.1f}%)
+  Tasks Failed Quality Check: {failed_quality_check}/{total_tasks} ({failed_quality_check/total_tasks*100:.1f}%)
+
+Detailed Quality Metrics:
+  Average Completeness Score: {avg_quality_details.get('completeness', 0.0):.3f}
+  Average Realism Score: {avg_quality_details.get('realism', 0.0):.3f}
+  Average Complexity Score: {avg_quality_details.get('complexity', 0.0):.3f}
+  Average Specificity Score: {avg_quality_details.get('specificity', 0.0):.3f}
+  Average Feasibility Score: {avg_quality_details.get('feasibility', 0.0):.3f}
+
+Task Metrics:
+  Average Task Steps: {avg_complexity:.1f}
+  Average Prompt Length: {avg_prompt_length:.0f} characters
+  Average Expected Duration: {sum(t.expected_duration for t in tasks if hasattr(t, 'expected_duration'))/total_tasks:.0f} seconds
+
+Quality Control Applied:
+  - Task completeness validation
+  - Realism assessment
+  - Complexity evaluation
+  - Specificity checking
+  - Feasibility verification
+  - Duplicate removal
+"""
+        
+        logger.info(report)
+    
+    def _get_web_pages(self, graph: DocumentGraph) -> List[WebPageNode]:
+        """Get all web page nodes from graph"""
+        pages = []
+        for node in graph.storage.nodes.values():
+            if isinstance(node, WebPageNode):
+                pages.append(node)
+        return pages
+    
+    def _get_web_elements(self, graph: DocumentGraph) -> List[WebElementNode]:
+        """Get all web element nodes from graph"""
+        elements = []
+        for node in graph.storage.nodes.values():
+            if isinstance(node, WebElementNode):
+                elements.append(node)
+        return elements
+    
+    def _generate_tasks_for_page(self, page: WebPageNode, elements: List[WebElementNode], 
+                                graph: DocumentGraph) -> List[WebTaskInstance]:
+        """Generate tasks for a specific web page"""
+        
+        tasks = []
+        
+        # Get elements for this page
+        page_elements = [e for e in elements if e.source_file == page.url]
+        
+        # Generate form filling tasks
+        if page.page_type == "form":
+            form_tasks = self._generate_form_filling_tasks(page, page_elements, graph)
+            tasks.extend(form_tasks)
+        
+        # Generate search tasks
+        elif page.page_type == "search":
+            search_tasks = self._generate_search_tasks(page, page_elements, graph)
+            tasks.extend(search_tasks)
+        
+        # Generate content browsing tasks
+        elif page.page_type == "content":
+            content_tasks = self._generate_content_tasks(page, page_elements, graph)
+            tasks.extend(content_tasks)
+        
+        # Generate product tasks
+        elif page.page_type == "product":
+            product_tasks = self._generate_product_tasks(page, page_elements, graph)
+            tasks.extend(product_tasks)
+        
+        return tasks
+    
+    def _generate_form_filling_tasks(self, page: WebPageNode, elements: List[WebElementNode], 
+                                    graph: DocumentGraph) -> List[WebTaskInstance]:
+        """Generate form filling tasks"""
+        
+        tasks = []
+        
+        # Find form elements
+        input_elements = [e for e in elements if e.is_input]
+        submit_buttons = [e for e in elements if e.element_type == 'button' and 'submit' in e.text_content.lower()]
+        
+        if not input_elements or not submit_buttons:
+            return tasks
+        
+        # Generate different form filling scenarios
+        scenarios = [
+            {
+                "name": "User Registration",
+                "inputs": ["name", "email", "password"],
+                "description": "Complete user registration form"
+            },
+            {
+                "name": "Contact Form",
+                "inputs": ["name", "email", "message"],
+                "description": "Fill out contact form"
+            },
+            {
+                "name": "Login Form",
+                "inputs": ["username", "password"],
+                "description": "Complete login form"
+            }
+        ]
+        
+        for scenario in scenarios:
+            task = self._create_form_task(page, input_elements, submit_buttons, scenario)
+            if task:
+                tasks.append(task)
+        
+        return tasks
+    
+    def _create_form_task(self, page: WebPageNode, input_elements: List[WebElementNode], 
+                         submit_buttons: List[WebElementNode], scenario: Dict[str, Any]) -> Optional[WebTaskInstance]:
+        """Create a form filling task"""
+        
+        # Find matching input elements
+        matching_inputs = []
+        for input_type in scenario["inputs"]:
+            for element in input_elements:
+                if (input_type in element.placeholder.lower() or 
+                    input_type in element.text_content.lower() or
+                    input_type in element.css_selector.lower()):
+                    matching_inputs.append(element)
+                    break
+        
+        if len(matching_inputs) < 2:  # Need at least 2 inputs for a meaningful task
+            return None
+        
+        # Create task steps
+        task_steps = []
+        for i, input_elem in enumerate(matching_inputs):
+            step = WebTaskStep(
+                step_id=f"step_{i+1}",
+                step_type="input",
+                target_element_id=input_elem.node_id,
+                target_page_url=page.url,
+                action_description=f"Enter {scenario['inputs'][i]} in the {input_elem.placeholder or input_elem.text_content} field",
+                expected_result=f"Field {input_elem.placeholder or input_elem.text_content} is filled",
+                input_data={"field_type": scenario["inputs"][i]}
+            )
+            task_steps.append(step)
+        
+        # Add submit step
+        if submit_buttons:
+            submit_step = WebTaskStep(
+                step_id=f"step_{len(task_steps)+1}",
+                step_type="click",
+                target_element_id=submit_buttons[0].node_id,
+                target_page_url=page.url,
+                action_description="Click submit button to complete form",
+                expected_result="Form is submitted successfully"
+            )
+            task_steps.append(submit_step)
+        
+        # Create task instance
+        task = WebTaskInstance(
+            task_id=f"form_task_{uuid.uuid4().hex[:8]}",
+            template_id="web_form_filling",
+            task_type="REASONING",
+            prompt=f"Complete the {scenario['name']} form on {page.title}. {scenario['description']}.",
+            gold_answer=f"Successfully completed {scenario['name']} form with all required fields filled.",
+            gold_nodes=[elem.node_id for elem in matching_inputs],
+            difficulty="MEDIUM",
+            required_capabilities=["FORM_FILLING", "NAVIGATION"],
+            web_task_type=WebTaskType.FORM_FILLING,
+            task_steps=task_steps,
+            start_page_url=page.url,
+            target_page_urls=[page.url],
+            required_elements=[elem.node_id for elem in matching_inputs + submit_buttons],
+            user_intent=f"Complete {scenario['name'].lower()}",
+            hop_count=len(task_steps),
+            interaction_count=len(matching_inputs) + 1,
+            data_extraction_count=0
+        )
+        
+        return task
+    
+    def _generate_search_tasks(self, page: WebPageNode, elements: List[WebElementNode], 
+                              graph: DocumentGraph) -> List[WebTaskInstance]:
+        """Generate search and filter tasks"""
+        
+        tasks = []
+        
+        # Find search elements
+        search_inputs = [e for e in elements if e.is_input and ('search' in e.placeholder.lower() or 'search' in e.text_content.lower())]
+        search_buttons = [e for e in elements if e.element_type == 'button' and ('search' in e.text_content.lower() or 'go' in e.text_content.lower())]
+        
+        if not search_inputs:
+            return tasks
+        
+        # Generate search scenarios
+        search_scenarios = [
+            {"query": "smartphone", "filters": ["price", "brand"]},
+            {"query": "laptop", "filters": ["price", "processor"]},
+            {"query": "book", "filters": ["genre", "author"]}
+        ]
+        
+        for scenario in search_scenarios:
+            task = self._create_search_task(page, search_inputs, search_buttons, scenario, elements)
+            if task:
+                tasks.append(task)
+        
+        return tasks
+    
+    def _create_search_task(self, page: WebPageNode, search_inputs: List[WebElementNode], 
+                           search_buttons: List[WebElementNode], scenario: Dict[str, Any],
+                           all_elements: List[WebElementNode]) -> Optional[WebTaskInstance]:
+        """Create a search task"""
+        
+        if not search_inputs:
+            return None
+        
+        # Create task steps
+        task_steps = []
+        
+        # Step 1: Enter search query
+        search_step = WebTaskStep(
+            step_id="step_1",
+            step_type="input",
+            target_element_id=search_inputs[0].node_id,
+            target_page_url=page.url,
+            action_description=f"Enter search query: {scenario['query']}",
+            expected_result=f"Search field contains '{scenario['query']}'",
+            input_data={"query": scenario["query"]}
+        )
+        task_steps.append(search_step)
+        
+        # Step 2: Click search button
+        if search_buttons:
+            search_button_step = WebTaskStep(
+                step_id="step_2",
+                step_type="click",
+                target_element_id=search_buttons[0].node_id,
+                target_page_url=page.url,
+                action_description="Click search button",
+                expected_result="Search results are displayed"
+            )
+            task_steps.append(search_button_step)
+        
+        # Step 3: Apply filters
+        filter_elements = [e for e in all_elements if any(filt in e.text_content.lower() for filt in scenario['filters'])]
+        for i, filter_elem in enumerate(filter_elements[:2]):  # Limit to 2 filters
+            filter_step = WebTaskStep(
+                step_id=f"step_{len(task_steps)+1}",
+                step_type="click",
+                target_element_id=filter_elem.node_id,
+                target_page_url=page.url,
+                action_description=f"Apply filter: {filter_elem.text_content}",
+                expected_result=f"Results filtered by {filter_elem.text_content}"
+            )
+            task_steps.append(filter_step)
+        
+        # Create task instance
+        task = WebTaskInstance(
+            task_id=f"search_task_{uuid.uuid4().hex[:8]}",
+            template_id="web_search_filter",
+            task_type="REASONING",
+            prompt=f"Search for '{scenario['query']}' and apply filters for {', '.join(scenario['filters'])} on {page.title}.",
+            gold_answer=f"Successfully searched for '{scenario['query']}' and applied {len(scenario['filters'])} filters.",
+            gold_nodes=[elem.node_id for elem in search_inputs + search_buttons + filter_elements],
+            difficulty="MEDIUM",
+            required_capabilities=["SEARCH", "FILTERING"],
+            web_task_type=WebTaskType.SEARCH_FILTER,
+            task_steps=task_steps,
+            start_page_url=page.url,
+            target_page_urls=[page.url],
+            required_elements=[elem.node_id for elem in search_inputs + search_buttons + filter_elements],
+            user_intent=f"Search for {scenario['query']} with filters",
+            hop_count=len(task_steps),
+            interaction_count=len(task_steps),
+            data_extraction_count=0
+        )
+        
+        return task
+    
+    def _generate_cross_page_tasks(self, pages: List[WebPageNode], elements: List[WebElementNode], 
+                                  graph: DocumentGraph) -> List[WebTaskInstance]:
+        """Generate tasks that span multiple pages"""
+        
+        tasks = []
+        
+        # Find navigation links
+        navigation_edges = [e for e in graph.storage.edges.values() if isinstance(e, WebNavigationEdge)]
+        
+        if len(navigation_edges) < 2:
+            return tasks
+        
+        # Generate information aggregation tasks
+        for i, edge in enumerate(navigation_edges[:5]):  # Limit to 5 tasks
+            task = self._create_cross_page_task(edge, pages, elements, graph)
+            if task:
+                tasks.append(task)
+        
+        return tasks
+    
+    def _create_cross_page_task(self, nav_edge: WebNavigationEdge, pages: List[WebPageNode], 
+                               elements: List[WebElementNode], graph: DocumentGraph) -> Optional[WebTaskInstance]:
+        """Create a cross-page task"""
+        
+        # Find source and target pages
+        source_page = None
+        target_page = None
+        
+        for page in pages:
+            if page.node_id == nav_edge.source_node_id:
+                source_page = page
+            elif page.node_id == nav_edge.target_node_id:
+                target_page = page
+        
+        if not source_page or not target_page:
+            return None
+        
+        # Create navigation task
+        task_steps = [
+            WebTaskStep(
+                step_id="step_1",
+                step_type="navigate",
+                target_element_id=nav_edge.source_node_id,
+                target_page_url=source_page.url,
+                action_description=f"Navigate to {source_page.title}",
+                expected_result=f"Successfully loaded {source_page.title}"
+            ),
+            WebTaskStep(
+                step_id="step_2",
+                step_type="click",
+                target_element_id=nav_edge.source_node_id,
+                target_page_url=source_page.url,
+                action_description=f"Click link to navigate to {target_page.title}",
+                expected_result=f"Successfully navigated to {target_page.title}"
+            )
+        ]
+        
+        task = WebTaskInstance(
+            task_id=f"nav_task_{uuid.uuid4().hex[:8]}",
+            template_id="web_navigation",
+            task_type="REASONING",
+            prompt=f"Navigate from {source_page.title} to {target_page.title}.",
+            gold_answer=f"Successfully navigated from {source_page.title} to {target_page.title}.",
+            gold_nodes=[nav_edge.source_node_id, nav_edge.target_node_id],
+            difficulty="EASY",
+            required_capabilities=["NAVIGATION"],
+            web_task_type=WebTaskType.NAVIGATION_TASK,
+            task_steps=task_steps,
+            start_page_url=source_page.url,
+            target_page_urls=[source_page.url, target_page.url],
+            required_elements=[nav_edge.source_node_id],
+            user_intent=f"Navigate from {source_page.title} to {target_page.title}",
+            hop_count=2,
+            interaction_count=1,
+            data_extraction_count=0
+        )
+        
+        return task
+    
+    def _generate_content_tasks(self, page: WebPageNode, elements: List[WebElementNode], 
+                               graph: DocumentGraph) -> List[WebTaskInstance]:
+        """Generate content browsing tasks"""
+        
+        tasks = []
+        
+        # Find content elements
+        content_elements = [e for e in elements if e.element_type in ['link', 'image', 'table']]
+        
+        if not content_elements:
+            return tasks
+        
+        # Generate content browsing scenarios
+        scenarios = [
+            {
+                "name": "Content Navigation",
+                "description": "Browse through content links and extract information",
+                "action_type": "click"
+            },
+            {
+                "name": "Image Analysis",
+                "description": "Analyze images and extract visual information",
+                "action_type": "extract"
+            },
+            {
+                "name": "Table Data Extraction",
+                "description": "Extract data from tables and summarize information",
+                "action_type": "extract"
+            }
+        ]
+        
+        for scenario in scenarios:
+            task = self._create_content_task(page, content_elements, scenario)
+            if task:
+                tasks.append(task)
+        
+        return tasks
+    
+    def _create_content_task(self, page: WebPageNode, content_elements: List[WebElementNode], 
+                            scenario: Dict[str, Any]) -> Optional[WebTaskInstance]:
+        """Create a content browsing task"""
+        
+        # Find relevant elements for the scenario
+        relevant_elements = []
+        if scenario["action_type"] == "click":
+            relevant_elements = [e for e in content_elements if e.element_type == 'link']
+        elif scenario["action_type"] == "extract":
+            if "image" in scenario["name"].lower():
+                relevant_elements = [e for e in content_elements if e.element_type == 'image']
+            elif "table" in scenario["name"].lower():
+                relevant_elements = [e for e in content_elements if e.element_type == 'table']
+        
+        if not relevant_elements:
+            return None
+        
+        # Create task steps
+        task_steps = []
+        for i, element in enumerate(relevant_elements[:3]):  # Limit to 3 elements
+            step = WebTaskStep(
+                step_id=f"step_{i+1}",
+                step_type=scenario["action_type"],
+                target_element_id=element.node_id,
+                target_page_url=page.url,
+                action_description=f"{scenario['action_type'].title()} {element.text_content or element.element_type}",
+                expected_result=f"Successfully processed {element.text_content or element.element_type}"
+            )
+            task_steps.append(step)
+        
+        # Create task instance
+        task = WebTaskInstance(
+            task_id=f"content_task_{uuid.uuid4().hex[:8]}",
+            template_id="web_content_browsing",
+            task_type="REASONING",
+            prompt=f"{scenario['name']} on {page.title}. {scenario['description']}.",
+            gold_answer=f"Successfully completed {scenario['name'].lower()} on {page.title}.",
+            gold_nodes=[elem.node_id for elem in relevant_elements],
+            difficulty="EASY",
+            required_capabilities=["CONTENT_BROWSING"],
+            web_task_type=WebTaskType.CONTENT_BROWSING,
+            task_steps=task_steps,
+            start_page_url=page.url,
+            target_page_urls=[page.url],
+            required_elements=[elem.node_id for elem in relevant_elements],
+            user_intent=f"Browse content on {page.title}",
+            hop_count=len(task_steps),
+            interaction_count=len(task_steps),
+            data_extraction_count=len([e for e in relevant_elements if e.element_type in ['image', 'table']])
+        )
+        
+        return task
+    
+    def _generate_product_tasks(self, page: WebPageNode, elements: List[WebElementNode], 
+                               graph: DocumentGraph) -> List[WebTaskInstance]:
+        """Generate e-commerce product tasks"""
+        
+        tasks = []
+        
+        # Find product-related elements
+        product_elements = [e for e in elements if any(keyword in e.text_content.lower() 
+                                                      for keyword in ['price', 'buy', 'add to cart', 'product'])]
+        price_elements = [e for e in elements if 'price' in e.text_content.lower()]
+        cart_elements = [e for e in elements if 'cart' in e.text_content.lower() or 'buy' in e.text_content.lower()]
+        
+        if not product_elements:
+            return tasks
+        
+        # Generate product scenarios
+        scenarios = [
+            {
+                "name": "Product Comparison",
+                "description": "Compare product prices and features",
+                "elements": price_elements + product_elements[:2]
+            },
+            {
+                "name": "Add to Cart",
+                "description": "Add product to shopping cart",
+                "elements": cart_elements + product_elements[:1]
+            },
+            {
+                "name": "Product Search",
+                "description": "Search for specific product and view details",
+                "elements": product_elements
+            }
+        ]
+        
+        for scenario in scenarios:
+            task = self._create_product_task(page, scenario["elements"], scenario)
+            if task:
+                tasks.append(task)
+        
+        return tasks
+    
+    def _create_product_task(self, page: WebPageNode, product_elements: List[WebElementNode], 
+                            scenario: Dict[str, Any]) -> Optional[WebTaskInstance]:
+        """Create a product-related task"""
+        
+        if not product_elements:
+            return None
+        
+        # Create task steps
+        task_steps = []
+        for i, element in enumerate(product_elements[:3]):  # Limit to 3 elements
+            step = WebTaskStep(
+                step_id=f"step_{i+1}",
+                step_type="click",
+                target_element_id=element.node_id,
+                target_page_url=page.url,
+                action_description=f"Interact with {element.text_content or element.element_type}",
+                expected_result=f"Successfully processed {element.text_content or element.element_type}"
+            )
+            task_steps.append(step)
+        
+        # Create task instance
+        task = WebTaskInstance(
+            task_id=f"product_task_{uuid.uuid4().hex[:8]}",
+            template_id="web_e_commerce",
+            task_type="REASONING",
+            prompt=f"{scenario['name']} on {page.title}. {scenario['description']}.",
+            gold_answer=f"Successfully completed {scenario['name'].lower()} on {page.title}.",
+            gold_nodes=[elem.node_id for elem in product_elements],
+            difficulty="MEDIUM",
+            required_capabilities=["E_COMMERCE"],
+            web_task_type=WebTaskType.E_COMMERCE_PURCHASE,
+            task_steps=task_steps,
+            start_page_url=page.url,
+            target_page_urls=[page.url],
+            required_elements=[elem.node_id for elem in product_elements],
+            user_intent=f"Complete {scenario['name'].lower()} on {page.title}",
+            hop_count=len(task_steps),
+            interaction_count=len(task_steps),
+            data_extraction_count=len([e for e in product_elements if 'price' in e.text_content.lower()])
+        )
+        
+        return task
+    
+    def _filter_and_balance_tasks(self, tasks: List[WebTaskInstance], target_count: int) -> List[WebTaskInstance]:
+        """Filter and balance generated tasks"""
+        
+        if len(tasks) <= target_count:
+            return tasks
+        
+        # Sort by complexity (hop count)
+        tasks.sort(key=lambda t: t.hop_count, reverse=True)
+        
+        # Take a balanced mix
+        balanced_tasks = []
+        task_types = {}
+        
+        for task in tasks:
+            task_type = task.web_task_type
+            if task_type not in task_types:
+                task_types[task_type] = 0
+            
+            if task_types[task_type] < target_count // 5:  # Assume 5 main task types
+                balanced_tasks.append(task)
+                task_types[task_type] += 1
+            
+            if len(balanced_tasks) >= target_count:
+                break
+        
+        return balanced_tasks
