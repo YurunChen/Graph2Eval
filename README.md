@@ -584,13 +584,6 @@ For questions, issues, or contributions:
 🐛 Issues: [GitHub Issues](https://github.com/YurunChen/Graph2Eval/issues)
 
 
-
-## 📄 License
-
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
-
-
-
 ---
 
 **⭐ Star this repository if you find it helpful!**
