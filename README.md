@@ -121,14 +121,11 @@ conda activate graphrag-bench
 
 **Option 1: Using .env file (Recommended)**
 
-Create a `.env` file in the root directory:
+Create a `.env` file in the root directory by copying from the example file:
 
 ```bash
-# Copy the example file
+# Copy the example file to create your .env file
 cp .env.example .env
-
-# Edit .env with your actual API keys
-nano .env
 ```
 
 Example `.env` file:
