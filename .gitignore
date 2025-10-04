@@ -61,7 +61,6 @@ Thumbs.db
 output/
 logs/
 cache/
-data/run_files/
 models/
 *.log
 *.faiss
