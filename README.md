@@ -64,17 +64,6 @@ Specialized agents for web-based tasks:
 - **Agent Type**: `no_rag`, `rag`, `agent_s`, `som_agent`
 - **RAG Integration**: Optional knowledge graph retrieval for all agent types
 
-### Core Workflow
-
-```mermaid
-graph TD
-    A[Documents] --> B[Document Ingestion]
-    B --> C[Graph Construction]
-    C --> D[Task Generation]
-    D --> E[Multi-Agent Execution]
-    E --> F[Evaluation]
-    F --> G[Results & Metrics]
-```
 
 ## 📖 Citation
 
