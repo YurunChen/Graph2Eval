@@ -1,12 +1,17 @@
 <div align="center">
-  <img src="assets/logo4(1).png" alt="Graph2Eval Logo" width="100"/>
-</div>
+<img src="assets/logo4(1).png" alt="Graph2Eval Logo" width="150" height="150" style="vertical-align: middle;">
 
-# Graph2Eval: Automatic Multimodal Task Generation for Agents via Knowledge Graphs
+# Graph2Eval
 
-<div align="center">
+### Automatic Multimodal Task Generation for Agents via Knowledge Graphs
 
-📄 [arXiv](https://arxiv.org/abs/2510.00507) | 🐦 [X](https://x.com/YRChen_AIsafety/status/1974361550279549192)
+[![Python](https://img.shields.io/badge/Python-3.10+-blue.svg?style=for-the-badge&logo=python&logoColor=white)](https://www.python.org/downloads/release/python-3120/)
+[![GitHub](https://img.shields.io/badge/GitHub-Repository-black.svg?style=for-the-badge&logo=github&logoColor=white)](https://github.com/YurunChen/Graph2Eval)
+[![License](https://img.shields.io/badge/License-MIT-yellow.svg?style=for-the-badge&logo=opensourceinitiative&logoColor=black)](LICENSE)
+
+*A knowledge graph-based framework for automatic task generation and evaluation*
+
+📄 [arXiv](https://arxiv.org/abs/2510.00507) | 🐦 [X (Twitter)](https://x.com/YRChen_AIsafety/status/1974361550279549192)
 
 </div> 
 
