@@ -1,5 +1,5 @@
 <div align="center">
-  <img src="assets/logo4(1).png" alt="Graph2Eval Logo" width="200"/>
+  <img src="assets/logo4(1).png" alt="Graph2Eval Logo" width="100"/>
 </div>
 
 # Graph2Eval: Automatic Multimodal Task Generation for Agents via Knowledge Graphs
