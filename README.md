@@ -203,7 +203,7 @@ The benchmark system supports four main modes: `collect`, `graph`, `generate`, a
 ```bash
 # Collect data from documents
 python benchmark_runner.py --mode collect \
-    --documents data/documents/sample.pdf data/documents/another.pdf
+    --documents documents/sample.pdf documents/another.pdf
 
 # Collect data from web URLs
 python benchmark_runner.py --mode collect \
@@ -211,7 +211,7 @@ python benchmark_runner.py --mode collect \
 
 # Custom output folder name using -n parameter
 python benchmark_runner.py --mode collect \
-    --documents data/documents/sample.pdf \
+    --documents documents/sample.pdf \
     -n my_custom_collection
 ```
 
@@ -220,13 +220,13 @@ python benchmark_runner.py --mode collect \
 ```bash
 # Build graph from collected data
 python benchmark_runner.py --mode graph \
-    --collection data/run_files/collections/ \
-    --output-dir data/run_files/graph/
+    --collection output/collect/run_*/collections/ \
+    --output-dir output/graph/run_*/
 
 # Custom output folder name using -n parameter
 python benchmark_runner.py --mode graph \
-    --collection data/run_files/collections/ \
-    --output-dir data/run_files/graph/ \
+    --collection output/collect/run_*/collections/ \
+    --output-dir output/graph/run_*/ \
     -n my_custom_graph
 ```
 
@@ -235,13 +235,13 @@ python benchmark_runner.py --mode graph \
 ```bash
 # Generate tasks from knowledge graph
 python benchmark_runner.py --mode generate \
-    --graph data/run_files/graph/ \
-    --output-dir data/run_files/datasets/
+    --graph output/graph/run_*/graph/ \
+    --output-dir output/generate/run_*/datasets/
 
 # Custom output folder name using -n parameter
 python benchmark_runner.py --mode generate \
-    --graph data/run_files/graph/ \
-    --output-dir data/run_files/datasets/ \
+    --graph output/graph/run_*/graph/ \
+    --output-dir output/generate/run_*/datasets/ \
     -n my_custom_tasks
 ```
 
@@ -250,11 +250,11 @@ python benchmark_runner.py --mode generate \
 ```bash
 # Evaluate on a single dataset file
 python benchmark_runner.py --mode evaluate \
-    --file data/run_files/datasets/tasks.jsonl
+    --file output/generate/run_*/datasets/tasks.jsonl
 
 # Batch evaluate on multiple datasets
 python benchmark_runner.py --mode evaluate \
-    --datasets-folder data/run_files/datasets/ \
+    --datasets-folder output/generate/run_*/datasets/ \
     --dataset-type all  # normal or all
 
 # Resume evaluation from existing results
@@ -263,12 +263,12 @@ python benchmark_runner.py --mode evaluate \
 
 # Only evaluate existing results (skip execution)
 python benchmark_runner.py --mode evaluate \
-    --file data/run_files/datasets/tasks.jsonl \
+    --file output/generate/run_*/datasets/tasks.jsonl \
     --evaluate-only
 
 # Custom output folder name using -n parameter
 python benchmark_runner.py --mode evaluate \
-    --file data/run_files/datasets/tasks.jsonl \
+    --file output/generate/run_*/datasets/tasks.jsonl \
     -n my_custom_evaluation
 ```
 
@@ -277,21 +277,21 @@ python benchmark_runner.py --mode evaluate \
 ```bash
 # Step 1: Collect data from documents
 python benchmark_runner.py --mode collect \
-    --documents data/documents/sample.pdf
+    --documents documents/sample.pdf
 
 # Step 2: Build knowledge graph
 python benchmark_runner.py --mode graph \
-    --collection data/run_files/collections/ \
-    --output-dir data/run_files/graph/
+    --collection output/collect/run_*/collections/ \
+    --output-dir output/graph/run_*/
 
 # Step 3: Generate tasks
 python benchmark_runner.py --mode generate \
-    --graph data/run_files/graph/ \
-    --output-dir data/run_files/datasets/
+    --graph output/graph/run_*/graph/ \
+    --output-dir output/generate/run_*/datasets/
 
 # Step 4: Evaluate agents
 python benchmark_runner.py --mode evaluate \
-    --datasets-folder data/run_files/datasets/ \
+    --datasets-folder output/generate/run_*/datasets/ \
     --dataset-type all
 ```
 
@@ -332,11 +332,6 @@ Graph2Eval/
 │   ├── graph_rag_config.yaml       # Graph construction settings
 │   ├── datasets_config.yaml        # Dataset configuration
 │   ├── ingestion_config.yaml       # Data ingestion settings
-├── 📁 data/                       # Working data and datasets
-│   ├── document/                   # Source documents
-│   ├── datasets/                   # Generated datasets
-│   ├── policy/                     # Safety policy files
-│   └── res/                        # Results and outputs
 ├── 📊 output/                     # Results and evaluation outputs
 │   ├── collect/                    # Data collection results
 │   ├── graph/                      # Graph construction results
@@ -410,7 +405,7 @@ graph_builder:
 
 storage:
   backend: "json"
-  file_path: "data/run_files/graph/knowledge_graph.json"
+  file_path: "output/graph/run_*/graph/knowledge_graph.json"
 ```
 
 ## 🎯 Usage Examples
@@ -420,21 +415,21 @@ storage:
 #### Single Document Processing
 ```bash
 # Process a single PDF document
-python benchmark_runner.py --mode collect --documents data/documents/research_paper.pdf
-python benchmark_runner.py --mode graph --collection data/run_files/collections/
-python benchmark_runner.py --mode generate --graph data/run_files/graph/
-python benchmark_runner.py --mode evaluate --file data/run_files/datasets/tasks.jsonl
+python benchmark_runner.py --mode collect --documents documents/research_paper.pdf
+python benchmark_runner.py --mode graph --collection output/collect/run_*/collections/
+python benchmark_runner.py --mode generate --graph output/graph/run_*/graph/
+python benchmark_runner.py --mode evaluate --file output/generate/run_*/datasets/tasks.jsonl
 ```
 
 #### Batch Processing Multiple Documents
 ```bash
 # Process multiple documents
 python benchmark_runner.py --mode collect \
-    --documents data/documents/*.pdf data/documents/*.txt
+    --documents documents/*.pdf documents/*.txt
 
 # Batch evaluate multiple datasets
 python benchmark_runner.py --mode evaluate \
-    --datasets-folder data/run_files/datasets/ \
+    --datasets-folder output/generate/run_*/datasets/ \
     --dataset-type all
 ```
 
@@ -445,9 +440,9 @@ python benchmark_runner.py --mode collect \
     --urls https://example.com https://httpbin.org/html
 
 # Continue with normal workflow
-python benchmark_runner.py --mode graph --collection data/run_files/collections/
-python benchmark_runner.py --mode generate --graph data/run_files/graph/
-python benchmark_runner.py --mode evaluate --datasets-folder data/run_files/datasets/
+python benchmark_runner.py --mode graph --collection output/collect/run_*/collections/
+python benchmark_runner.py --mode generate --graph output/graph/run_*/graph/
+python benchmark_runner.py --mode evaluate --datasets-folder output/generate/run_*/datasets/
 ```
 
 #### Resume and Debug Options
@@ -458,12 +453,12 @@ python benchmark_runner.py --mode evaluate \
 
 # Debug mode with verbose logging
 python benchmark_runner.py --mode evaluate \
-    --file data/run_files/datasets/tasks.jsonl \
+    --file output/generate/run_*/datasets/tasks.jsonl \
     --debug
 
 # Only evaluate existing results (skip execution)
 python benchmark_runner.py --mode evaluate \
-    --file data/run_files/datasets/tasks.jsonl \
+    --file output/generate/run_*/datasets/tasks.jsonl \
     --evaluate-only
 ```
 
@@ -569,16 +564,16 @@ output/evaluate/test_text_single_agent_rag/
 ### Data Flow Structure
 
 ```
-data/run_files/
-├── collections/                        # Collected document data
+output/
+├── collect/run_*/collections/          # Collected document data
 │   ├── documents.jsonl
 │   └── web_data.jsonl
-├── graph/                              # Knowledge graph data
+├── graph/run_*/graph/                  # Knowledge graph data
 │   ├── knowledge_graph.json
 │   └── vectors/
 │       ├── vectors_faiss.faiss
 │       └── vectors_faiss.metadata
-└── datasets/                           # Generated task datasets
+└── generate/run_*/datasets/            # Generated task datasets
     ├── all_tasks.jsonl
     ├── normal_tasks.jsonl
     └── safety_tasks.jsonl
@@ -591,12 +586,12 @@ data/run_files/
 ```bash
 # Custom run name
 python benchmark_runner.py --mode evaluate \
-    --file data/run_files/datasets/tasks.jsonl \
+    --file output/generate/run_*/datasets/tasks.jsonl \
     --run-name "experiment_v1"
 
 # Dataset type filtering
 python benchmark_runner.py --mode evaluate \
-    --datasets-folder data/run_files/datasets/ \
+    --datasets-folder output/generate/run_*/datasets/ \
     --dataset-type normal  # Only normal tasks
 
 # Resume interrupted evaluation
@@ -605,7 +600,7 @@ python benchmark_runner.py --mode evaluate \
 
 # Debug mode with verbose logging
 python benchmark_runner.py --mode evaluate \
-    --file data/run_files/datasets/tasks.jsonl \
+    --file output/generate/run_*/datasets/tasks.jsonl \
     --debug
 ```
 
