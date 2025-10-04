@@ -3,8 +3,8 @@
 </div>
 
 # Graph2Eval: Automatic Multimodal Task Generation for Agents via Knowledge Graphs
-[![Python 3.8+](https://img.shields.io/badge/python-3.8+-blue.svg)](https://www.python.org/downloads/)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+
+📄 [arXiv](https://arxiv.org/abs/2510.00507) | 🐦 [X](https://x.com/YRChen_AIsafety/status/1974361550279549192) 
 
 ## 🎯 Overview
 
