@@ -11,113 +11,12 @@ import re
 from jinja2 import Template
 
 
-class TaskType(Enum):
-    """Types of tasks that can be generated"""
-    # Basic comprehension
-    EXTRACTION = "extraction"  # Extract specific information
-    SUMMARIZATION = "summarization"  # Summarize content
-    COMPREHENSION = "comprehension"  # Answer questions about content
-    
-    # Analysis and reasoning
-    COMPARISON = "comparison"  # Compare multiple pieces of information
-    ANALYSIS = "analysis"  # Analyze relationships or patterns
-    REASONING = "reasoning"  # Multi-step reasoning tasks
-    
-    # Aggregation and synthesis
-    AGGREGATION = "aggregation"  # Combine information from multiple sources
-    SYNTHESIS = "synthesis"  # Create new insights from existing information
-    
-    # Specialized tasks
-    TABLE_QA = "table_qa"  # Question answering over tables
-    FIGURE_INTERPRETATION = "figure_interpretation"  # Interpret figures/charts
-    CROSS_REFERENCE = "cross_reference"  # Follow cross-references
-    
-    # Safety and compliance tasks
-    FACT_VERIFICATION = "fact_verification"  # Verify factual claims
-    
-    # Web task types
-    SEARCH = "Search"  # Search functionality, filtering
-    FORM_FILLING = "Form Filling"  # Complete forms, login, registration
-    NAVIGATION = "Navigation"  # Multi-page navigation, link following
-    DATA_EXTRACTION = "Data Extraction"  # Extract information from pages
-    E_COMMERCE = "E-commerce"  # Product browsing, shopping cart
-    CONTENT_BROWSING = "Content Browsing"  # Reading articles, exploring content
-    
-    # Dynamic threat types (for LLM-based safety tasks)
-    CONTENT_INJECTION = "content_injection"  # Content injection threat
-    PROMPT_MANIPULATION = "prompt_manipulation"  # Prompt manipulation threat
-    CONTEXT_SWITCHING = "context_switching"  # Context switching threat
-    INDIRECT_REFERENCE = "indirect_reference"  # Indirect reference threat
-    
-    # Web safety task types
-    WEB_MALICIOUS_INPUT = "web_malicious_input"  # Malicious input detection
-    WEB_PHISHING_DETECTION = "web_phishing_detection"  # Phishing detection
-    WEB_DATA_PRIVACY = "web_data_privacy"  # Data privacy protection
-    WEB_ACCESS_CONTROL = "web_access_control"  # Access control validation
-    WEB_CONTENT_MODERATION = "web_content_moderation"  # Content moderation
-    WEB_FORM_VALIDATION = "web_form_validation"  # Form validation
-    WEB_NAVIGATION_SAFETY = "web_navigation_safety"  # Navigation safety
-    
-    @classmethod
-    def is_safety_task(cls, task_type) -> bool:
-        """Check if a task type is a safety-related task"""
-        safety_types = {
-            # Dynamic threat types
-            cls.CONTENT_INJECTION,
-            cls.PROMPT_MANIPULATION,
-            cls.CONTEXT_SWITCHING,
-            cls.INDIRECT_REFERENCE,
-            
-            # Web safety types
-            cls.WEB_MALICIOUS_INPUT,
-            cls.WEB_PHISHING_DETECTION,
-            cls.WEB_DATA_PRIVACY,
-            cls.WEB_ACCESS_CONTROL,
-            cls.WEB_CONTENT_MODERATION,
-            cls.WEB_FORM_VALIDATION,
-            cls.WEB_NAVIGATION_SAFETY
-        }
-        return task_type in safety_types
-    
-    @classmethod
-    def is_normal_task(cls, task_type) -> bool:
-        """Check if a task type is a normal (non-safety) task"""
-        return not cls.is_safety_task(task_type)
-    
-    @classmethod
-    def from_strategy(cls, strategy: str) -> 'TaskType':
-        """Convert embedding strategy to TaskType"""
-        strategy_mapping = {
-            'content_injection': cls.CONTENT_INJECTION,
-            'prompt_manipulation': cls.PROMPT_MANIPULATION,
-            'context_switching': cls.CONTEXT_SWITCHING,
-            'indirect_reference': cls.INDIRECT_REFERENCE,
-            
-            # Web safety strategies
-            'malicious_input': cls.WEB_MALICIOUS_INPUT,
-            'phishing_detection': cls.WEB_PHISHING_DETECTION,
-            'data_privacy': cls.WEB_DATA_PRIVACY,
-            'access_control': cls.WEB_ACCESS_CONTROL,
-            'content_moderation': cls.WEB_CONTENT_MODERATION,
-            'form_validation': cls.WEB_FORM_VALIDATION,
-            'navigation_safety': cls.WEB_NAVIGATION_SAFETY,
-            
-            # Web task strategies
-            'search': cls.SEARCH,
-            'form_filling': cls.FORM_FILLING,
-            'navigation': cls.NAVIGATION,
-            'data_extraction': cls.DATA_EXTRACTION,
-            'e_commerce': cls.E_COMMERCE,
-            'content_browsing': cls.CONTENT_BROWSING,
-            # Also support the actual values used by web task generator
-            'Search': cls.SEARCH,
-            'Form Filling': cls.FORM_FILLING,
-            'Navigation': cls.NAVIGATION,
-            'Data Extraction': cls.DATA_EXTRACTION,
-            'E-commerce': cls.E_COMMERCE,
-            'Content Browsing': cls.CONTENT_BROWSING
-        }
-        return strategy_mapping.get(strategy, cls.CONTENT_INJECTION)  # Default to content_injection
+# Import the new separated task types
+from .text_task_types import TextTaskType, TextTaskTemplate
+
+
+# For backward compatibility, create aliases
+TaskType = TextTaskType  # Legacy alias for text tasks
 
 
 class TaskDifficulty(Enum):
@@ -197,7 +96,7 @@ class TaskTemplate:
         """Get default evaluation metrics for task type"""
         metrics_map = {
             TaskType.EXTRACTION: ["exact_match", "f1_score"],
-            TaskType.SUMMARIZATION: ["rouge_score", "bert_score"],
+            TaskType.SUMMARIZATION: ["rouge_score", "llm_assessment"],
             TaskType.COMPREHENSION: ["exact_match", "f1_score"],
             TaskType.COMPARISON: ["accuracy", "f1_score"],
             TaskType.ANALYSIS: ["accuracy", "reasoning_quality"],
@@ -209,28 +108,11 @@ class TaskTemplate:
             TaskType.CROSS_REFERENCE: ["citation_f1", "link_accuracy"],
             TaskType.FACT_VERIFICATION: ["accuracy", "confidence"],
             
-            # Web task types
-            TaskType.SEARCH: ["accuracy", "completeness"],
-            TaskType.FORM_FILLING: ["accuracy", "completeness"],
-            TaskType.NAVIGATION: ["accuracy", "completeness"],
-            TaskType.DATA_EXTRACTION: ["exact_match", "f1_score"],
-            TaskType.E_COMMERCE: ["accuracy", "completeness"],
-            TaskType.CONTENT_BROWSING: ["accuracy", "completeness"],
-            
-            # Dynamic threat types
+            # Dynamic threat types (text safety tasks)
             TaskType.CONTENT_INJECTION: ["precision", "recall"],
             TaskType.PROMPT_MANIPULATION: ["precision", "recall"],
             TaskType.CONTEXT_SWITCHING: ["precision", "recall"],
-            TaskType.INDIRECT_REFERENCE: ["precision", "recall"],
-            
-            # Web safety types
-            TaskType.WEB_MALICIOUS_INPUT: ["precision", "recall"],
-            TaskType.WEB_PHISHING_DETECTION: ["precision", "recall"],
-            TaskType.WEB_DATA_PRIVACY: ["precision", "recall"],
-            TaskType.WEB_ACCESS_CONTROL: ["precision", "recall"],
-            TaskType.WEB_CONTENT_MODERATION: ["precision", "recall"],
-            TaskType.WEB_FORM_VALIDATION: ["precision", "recall"],
-            TaskType.WEB_NAVIGATION_SAFETY: ["precision", "recall"]
+            TaskType.INDIRECT_REFERENCE: ["precision", "recall"]
         }
         return metrics_map.get(self.task_type, ["accuracy"])
     
@@ -474,7 +356,7 @@ class TaskTemplateLibrary:
             required_edge_types=["semantic_sim", "sequence"],
             min_nodes=2,
             max_nodes=6,
-            evaluation_metrics=["rouge_score", "bert_score", "citation_f1"],
+            evaluation_metrics=["rouge_score", "llm_assessment", "citation_f1"],
             requires_citations=True
         ))
         

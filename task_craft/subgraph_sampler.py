@@ -21,7 +21,7 @@ class SamplingConfig:
     max_samples_per_template: int = 20
     min_subgraph_size: int = 1
     max_subgraph_size: int = 8
-    sampling_strategy: str = "random"  # random, motif_based, centrality_based, semantic_based, context_chain_based, contradiction_based
+    sampling_strategy: str = "hybrid"  # hybrid, motif_based, centrality_based, semantic_based, context_chain_based, contradiction_based
     avoid_disconnected: bool = True
     ensure_diversity: bool = True
     random_seed: Optional[int] = None
@@ -63,7 +63,9 @@ class SubgraphSampler:
         logger.debug(f"Sampling subgraphs for template: {template.template_id}")
         
         # Get sampling strategy
-        if self.config.sampling_strategy == "motif_based":
+        if self.config.sampling_strategy == "hybrid":
+            return self._sample_hybrid(graph, template)
+        elif self.config.sampling_strategy == "motif_based":
             return self._sample_motif_based(graph, template)
         elif self.config.sampling_strategy == "centrality_based":
             return self._sample_centrality_based(graph, template)
@@ -74,43 +76,10 @@ class SubgraphSampler:
         elif self.config.sampling_strategy == "contradiction_based":
             return self._sample_contradiction_based(graph, template)
         else:
-            return self._sample_random(graph, template)
+            # Fallback to centrality-based sampling
+            return self._sample_centrality_based(graph, template)
     
-    def _sample_random(
-        self, 
-        graph: DocumentGraph, 
-        template: TaskTemplate
-    ) -> List[Tuple[List[Node], List[Edge]]]:
-        """Random subgraph sampling"""
-        
-        subgraphs = []
-        attempts = 0
-        max_attempts = self.config.max_samples_per_template * 10
-        
-        # Get candidate nodes that match template requirements
-        candidate_nodes = self._get_candidate_nodes(graph, template)
-        
-        if not candidate_nodes:
-            return subgraphs
-        
-        while len(subgraphs) < self.config.max_samples_per_template and attempts < max_attempts:
-            attempts += 1
-            
-            # Sample initial node
-            start_node = random.choice(candidate_nodes)
-            
-            # Expand to create subgraph
-            subgraph_nodes, subgraph_edges = self._expand_subgraph(
-                graph, start_node, template
-            )
-            
-            # Check if subgraph meets requirements
-            if self._is_valid_subgraph(subgraph_nodes, subgraph_edges, template):
-                if not self._is_duplicate_subgraph(subgraph_nodes, subgraphs):
-                    subgraphs.append((subgraph_nodes, subgraph_edges))
-        
-        logger.debug(f"Random sampling generated {len(subgraphs)} subgraphs")
-        return subgraphs
+
     
     def _sample_motif_based(
         self, 
@@ -131,11 +100,11 @@ class SubgraphSampler:
             if len(subgraphs) >= self.config.max_samples_per_template:
                 break
         
-        # Fill remaining slots with random sampling if needed
+        # Fill remaining slots with centrality-based sampling if needed
         if len(subgraphs) < self.config.max_samples_per_template:
             remaining = self.config.max_samples_per_template - len(subgraphs)
-            random_subgraphs = self._sample_random(graph, template)
-            subgraphs.extend(random_subgraphs[:remaining])
+            centrality_subgraphs = self._sample_centrality_based(graph, template)
+            subgraphs.extend(centrality_subgraphs[:remaining])
         
         logger.debug(f"Motif-based sampling generated {len(subgraphs)} subgraphs")
         return subgraphs
@@ -557,6 +526,133 @@ class SubgraphSampler:
                     edges.append(edge)
         
         return edges
+    
+    def _sample_context_chain_based(
+        self, 
+        graph: DocumentGraph, 
+        template: TaskTemplate
+    ) -> List[Tuple[List[Node], List[Edge]]]:
+        """Sample subgraphs using context chain strategy"""
+        
+        chain_sampler = ContextChainSampler(self.config)
+        return chain_sampler.sample_context_chains(graph, template)
+
+    def _sample_contradiction_based(
+        self, 
+        graph: DocumentGraph, 
+        template: TaskTemplate
+    ) -> List[Tuple[List[Node], List[Edge]]]:
+        """Sample subgraphs using contradiction detection strategy"""
+        
+        contradiction_sampler = ContradictionSampler(self.config)
+        return contradiction_sampler.sample_contradiction_pairs(graph, template)
+
+    def _sample_hybrid(
+        self, 
+        graph: DocumentGraph, 
+        template: TaskTemplate
+    ) -> List[Tuple[List[Node], List[Edge]]]:
+        """Sample subgraphs using hybrid strategy combining multiple approaches"""
+        
+        logger.debug(f"Starting hybrid sampling for template: {template.template_id}")
+        
+        # Get hybrid configuration
+        config = get_config()
+        hybrid_config = config.task_craft.get('subgraph_sampling', {}).get('hybrid', {})
+        
+        strategies = hybrid_config.get('strategies', ['motif_based', 'centrality_based', 'semantic_based'])
+        strategy_weights = hybrid_config.get('strategy_weights', [0.25, 0.25, 0.2, 0.15, 0.15])
+        min_samples_per_strategy = hybrid_config.get('min_samples_per_strategy', 1)
+        max_samples_per_strategy = hybrid_config.get('max_samples_per_strategy', 2)
+        quality_threshold = hybrid_config.get('quality_threshold', 0.7)
+        fallback_strategy = hybrid_config.get('fallback_strategy', 'centrality_based')
+        
+        # Ensure weights match strategies
+        if len(strategy_weights) != len(strategies):
+            strategy_weights = [1.0 / len(strategies)] * len(strategies)
+        
+        all_subgraphs = []
+        strategy_results = {}
+        
+        # Execute each strategy
+        for i, strategy in enumerate(strategies):
+            try:
+                logger.debug(f"Executing strategy: {strategy}")
+                
+                if strategy == "motif_based":
+                    subgraphs = self._sample_motif_based(graph, template)
+                elif strategy == "centrality_based":
+                    subgraphs = self._sample_centrality_based(graph, template)
+                elif strategy == "semantic_based":
+                    subgraphs = self._sample_semantic_based(graph, template)
+                elif strategy == "context_chain_based":
+                    subgraphs = self._sample_context_chain_based(graph, template)
+                elif strategy == "contradiction_based":
+                    subgraphs = self._sample_contradiction_based(graph, template)
+                else:
+                    logger.warning(f"Unknown strategy: {strategy}, skipping")
+                    continue
+                
+                # Apply strategy-specific limits
+                weight = strategy_weights[i]
+                target_samples = max(min_samples_per_strategy, 
+                                   min(max_samples_per_strategy, 
+                                       int(self.config.max_samples_per_template * weight)))
+                
+                # Limit subgraphs for this strategy
+                if len(subgraphs) > target_samples:
+                    subgraphs = subgraphs[:target_samples]
+                
+                strategy_results[strategy] = {
+                    'subgraphs': subgraphs,
+                    'count': len(subgraphs),
+                    'weight': weight
+                }
+                
+                all_subgraphs.extend(subgraphs)
+                logger.debug(f"Strategy {strategy} generated {len(subgraphs)} subgraphs")
+                
+            except Exception as e:
+                logger.error(f"Error in strategy {strategy}: {e}")
+                continue
+        
+        # If no subgraphs generated, use fallback strategy
+        if not all_subgraphs:
+            logger.warning(f"No subgraphs generated by hybrid strategy, using fallback: {fallback_strategy}")
+            if fallback_strategy == "centrality_based":
+                all_subgraphs = self._sample_centrality_based(graph, template)
+            elif fallback_strategy == "motif_based":
+                all_subgraphs = self._sample_motif_based(graph, template)
+            elif fallback_strategy == "semantic_based":
+                all_subgraphs = self._sample_semantic_based(graph, template)
+            else:
+                all_subgraphs = self._sample_centrality_based(graph, template)
+        
+        # Remove duplicates
+        unique_subgraphs = []
+        seen_node_sets = set()
+        
+        for subgraph in all_subgraphs:
+            nodes, edges = subgraph
+            node_set = frozenset(node.node_id for node in nodes)
+            if node_set not in seen_node_sets:
+                seen_node_sets.add(node_set)
+                unique_subgraphs.append(subgraph)
+        
+        # Limit total subgraphs
+        if len(unique_subgraphs) > self.config.max_samples_per_template:
+            unique_subgraphs = unique_subgraphs[:self.config.max_samples_per_template]
+        
+        # Log strategy performance
+        total_generated = sum(result['count'] for result in strategy_results.values())
+        logger.info(f"Hybrid sampling completed:")
+        logger.info(f"  Total strategies executed: {len(strategy_results)}")
+        logger.info(f"  Total subgraphs generated: {total_generated}")
+        logger.info(f"  Unique subgraphs after deduplication: {len(unique_subgraphs)}")
+        for strategy, result in strategy_results.items():
+            logger.info(f"  {strategy}: {result['count']} subgraphs (weight: {result['weight']:.2f})")
+        
+        return unique_subgraphs
 
 
 class MotifSampler:
@@ -729,7 +825,9 @@ class ContextChainSampler:
         # Prefer nodes with outgoing edges (can start a chain)
         chain_starters = []
         for node in candidate_nodes:
-            outgoing_edges = graph.get_outgoing_edges(node.node_id)
+            # Get outgoing edges using storage
+            all_edges = graph.storage.find_edges()
+            outgoing_edges = [edge for edge in all_edges if edge.source_node_id == node.node_id]
             if len(outgoing_edges) >= 2:  # Need at least 2 edges to form a chain
                 chain_starters.append(node)
         
@@ -749,8 +847,9 @@ class ContextChainSampler:
         current_node = start_node
         
         for _ in range(chain_length - 1):
-            # Get outgoing edges
-            outgoing_edges = graph.get_outgoing_edges(current_node.node_id)
+            # Get outgoing edges using storage
+            all_edges = graph.storage.find_edges()
+            outgoing_edges = [edge for edge in all_edges if edge.source_node_id == current_node.node_id]
             
             # Filter edges by template requirements
             valid_edges = [
@@ -834,8 +933,11 @@ class ContextChainSampler:
         node_ids = {node.node_id for node in nodes}
         
         for node in nodes:
-            # Get all edges for this node
-            all_edges = graph.get_incoming_edges(node.node_id) + graph.get_outgoing_edges(node.node_id)
+            # Get all edges for this node using storage
+            all_graph_edges = graph.storage.find_edges()
+            incoming_edges = [edge for edge in all_graph_edges if edge.target_node_id == node.node_id]
+            outgoing_edges = [edge for edge in all_graph_edges if edge.source_node_id == node.node_id]
+            all_edges = incoming_edges + outgoing_edges
             
             for edge in all_edges:
                 # Check if both endpoints are in our node set
@@ -959,9 +1061,10 @@ class ContradictionSampler:
         
         neighbors = []
         
-        # Get incoming and outgoing edges
-        incoming_edges = graph.get_incoming_edges(node.node_id)
-        outgoing_edges = graph.get_outgoing_edges(node.node_id)
+        # Get incoming and outgoing edges using storage
+        all_graph_edges = graph.storage.find_edges()
+        incoming_edges = [edge for edge in all_graph_edges if edge.target_node_id == node.node_id]
+        outgoing_edges = [edge for edge in all_graph_edges if edge.source_node_id == node.node_id]
         
         all_edges = incoming_edges + outgoing_edges
         
@@ -1016,8 +1119,11 @@ class ContradictionSampler:
         node_ids = {node.node_id for node in nodes}
         
         for node in nodes:
-            # Get all edges for this node
-            all_edges = graph.get_incoming_edges(node.node_id) + graph.get_outgoing_edges(node.node_id)
+            # Get all edges for this node using storage
+            all_graph_edges = graph.storage.find_edges()
+            incoming_edges = [edge for edge in all_graph_edges if edge.target_node_id == node.node_id]
+            outgoing_edges = [edge for edge in all_graph_edges if edge.source_node_id == node.node_id]
+            all_edges = incoming_edges + outgoing_edges
             
             for edge in all_edges:
                 # Check if both endpoints are in our node set
@@ -1029,24 +1135,4 @@ class ContradictionSampler:
         return edges
 
 
-# Add the new sampling methods to SubgraphSampler class
-def _sample_context_chain_based(
-    self, 
-    graph: DocumentGraph, 
-    template: TaskTemplate
-) -> List[Tuple[List[Node], List[Edge]]]:
-    """Sample subgraphs using context chain strategy"""
-    
-    chain_sampler = ContextChainSampler(self.config)
-    return chain_sampler.sample_context_chains(graph, template)
 
-
-def _sample_contradiction_based(
-    self, 
-    graph: DocumentGraph, 
-    template: TaskTemplate
-) -> List[Tuple[List[Node], List[Edge]]]:
-    """Sample subgraphs using contradiction detection strategy"""
-    
-    contradiction_sampler = ContradictionSampler(self.config)
-    return contradiction_sampler.sample_contradiction_pairs(graph, template)

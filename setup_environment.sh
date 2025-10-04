@@ -231,10 +231,17 @@ install_browser_automation() {
     print_step "Installing browser automation tools"
     
     print_info "Installing Playwright browsers..."
-    if conda run -n "$ENV_NAME" playwright install >/dev/null 2>&1; then
+    # Install all browsers (chromium, firefox, webkit) with system dependencies
+    if conda run -n "$ENV_NAME" playwright install --with-deps; then
         print_success "Playwright browsers installed successfully"
     else
-        print_warning "Playwright browser installation failed, will use Selenium fallback"
+        print_warning "Playwright browser installation failed, trying without system dependencies..."
+        # Fallback: install browsers without system dependencies
+        if conda run -n "$ENV_NAME" playwright install chromium firefox webkit; then
+            print_success "Playwright browsers installed (without system dependencies)"
+        else
+            print_warning "Playwright browser installation failed, will use Selenium fallback"
+        fi
     fi
     
     print_info "Checking Chrome/Chromium availability for Selenium..."

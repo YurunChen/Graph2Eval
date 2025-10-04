@@ -4,6 +4,7 @@ transformers>=4.30.0
 langchain>=0.1.0
 openai>=1.0.0
 anthropic>=0.18.0
+google-generativeai>=0.8.0
 transformers>=4.30.0
 
 # Graph and vector databases
@@ -31,10 +32,11 @@ spacy>=3.6.0
 fastapi>=0.100.0
 uvicorn>=0.23.0
 httpx>=0.24.0
+requests>=2.31.0
 pydantic>=2.0.0
 
 # Web Agent dependencies
-playwright>=1.40.0
+playwright==1.54.0
 selenium>=4.15.0
 requests-html>=0.10.0
 lxml>=4.9.0
@@ -62,3 +64,4 @@ python-dotenv>=1.0.0
 click>=8.1.0
 tqdm>=4.65.0
 loguru>=0.7.0
+psutil>=5.9.0

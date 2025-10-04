@@ -24,6 +24,18 @@ graph_builder:
   use_chunking: true
   chunk_size: 500
   chunk_overlap: 50
+  
+  # Memory optimization settings
+  enable_memory_optimization: true
+  batch_size: 50  # Process elements in batches (reduced for better memory control)
+  max_elements_per_page: 150  # Limit elements per page (reduced)
+  max_semantic_edges_per_page: 30  # Limit semantic edges per page (reduced)
+  max_spatial_edges_per_page: 20  # Limit spatial edges per page
+  max_functional_edges_per_page: 25  # Limit functional edges per page
+  max_interaction_edges_per_page: 20  # Limit interaction edges per page
+  enable_progressive_building: true  # Build graph progressively
+  memory_cleanup_interval: 25  # Cleanup every N operations (more frequent)
+  vector_batch_size: 30  # Smaller batch size for vector creation
 
 # Embedding configuration
 embeddings:

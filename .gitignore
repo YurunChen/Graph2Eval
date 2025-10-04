@@ -1,6 +1,11 @@
 # Environment variables and API keys
 .env
 *.env
+.history
+
+data/
+
+finetuning/
 
 # Python
 __pycache__/

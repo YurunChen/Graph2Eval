@@ -165,12 +165,12 @@ class RAGAgent:
     def _create_executor(self) -> TaskExecutor:
         """Create executor based on configuration"""
         if self.config.executor_type == "llm":
-            return LLMExecutor.get_instance(self.config.execution_config)
+            return LLMExecutor(self.config.execution_config)
         elif self.config.executor_type == "multistep":
             return MultiStepExecutor(self.config.execution_config)
         else:
             logger.warning(f"Unknown executor type: {self.config.executor_type}, using llm")
-            return LLMExecutor.get_instance(self.config.execution_config)
+            return LLMExecutor(self.config.execution_config)
     
     def set_graph(self, graph: DocumentGraph):
         """Set the knowledge graph for the agent"""

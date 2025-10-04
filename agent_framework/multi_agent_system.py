@@ -39,6 +39,7 @@ class ReasoningStep:
     reasoning: str
     confidence: float
     step_type: str  # "retrieval", "inference", "synthesis"
+    tokens_used: int = 0
     
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary"""
@@ -50,7 +51,8 @@ class ReasoningStep:
             "edges": self.edges,
             "reasoning": self.reasoning,
             "confidence": self.confidence,
-            "step_type": self.step_type
+            "step_type": self.step_type,
+            "tokens_used": self.tokens_used
         }
 
 
@@ -82,6 +84,7 @@ class VerificationResult:
     suggestions: List[str]
     confidence: float
     reasoning: str
+    tokens_used: int = 0
     
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary"""
@@ -90,7 +93,8 @@ class VerificationResult:
             "issues": self.issues,
             "suggestions": self.suggestions,
             "confidence": self.confidence,
-            "reasoning": self.reasoning
+            "reasoning": self.reasoning,
+            "tokens_used": self.tokens_used
         }
 
 
@@ -140,7 +144,8 @@ class MultiAgentResponse:
                     "edges": step.edges,
                     "reasoning": step.reasoning,
                     "confidence": step.confidence,
-                    "step_type": step.step_type
+                    "step_type": step.step_type,
+                    "tokens_used": step.tokens_used
                 }
                 for step in self.reasoner_output
             ],
@@ -149,7 +154,8 @@ class MultiAgentResponse:
                 "issues": self.verifier_output.issues,
                 "suggestions": self.verifier_output.suggestions,
                 "confidence": self.verifier_output.confidence,
-                "reasoning": self.verifier_output.reasoning
+                "reasoning": self.verifier_output.reasoning,
+                "tokens_used": self.verifier_output.tokens_used
             },
             "summarizer_output": self.summarizer_output,
             "execution_time": self.execution_time,
@@ -171,8 +177,8 @@ class BaseAgent(ABC):
             self.executor = executor
             self.logger = logger.bind(agent=role.value)
         else:
-            # Use shared singleton executor instead of creating new instance
-            self.executor = LLMExecutor.get_instance(config.execution_config)
+            # Create new executor instance with the provided config
+            self.executor = LLMExecutor(config.execution_config)
             self.logger = logger.bind(agent=role.value)
     
     @abstractmethod
@@ -226,7 +232,7 @@ class PlannerAgent(BaseAgent):
             initial_retrieval = self._perform_initial_retrieval(task, graph)
             
             # Use shared singleton executor instead of creating new instance
-            temp_executor = LLMExecutor.get_instance()
+            temp_executor = self.executor
             
             # Use temporary executor to execute planning task
             response = temp_executor.execute(planning_task, initial_retrieval)
@@ -648,13 +654,19 @@ class ReasonerAgent(BaseAgent):
         try:
             # Execute reasoning steps
             reasoning_steps = []
+            total_tokens = 0
             steps = plan.get('reasoning_steps', [])
             
             for i, step_plan in enumerate(steps):
-                step = self._execute_reasoning_step(step_plan, subgraph_info, task, i, context)
+                step, tokens = self._execute_reasoning_step(step_plan, subgraph_info, task, i, context)
                 reasoning_steps.append(step)
+                total_tokens += tokens
             
             self._log_execution(f"Reasoning completed, executed {len(reasoning_steps)} reasoning steps")
+            
+            # Store tokens in the first reasoning step for retrieval
+            if reasoning_steps:
+                reasoning_steps[0].tokens_used = total_tokens
             
             return reasoning_steps
             
@@ -738,7 +750,7 @@ class ReasonerAgent(BaseAgent):
         )
         
         # Use shared singleton executor instead of creating new instance
-        temp_executor = LLMExecutor.get_instance()
+        temp_executor = self.executor
         
         # Use temporary executor to execute reasoning task
         response = temp_executor.execute(reasoning_task, reasoning_context)
@@ -746,7 +758,7 @@ class ReasonerAgent(BaseAgent):
         # Parse reasoning result from executor response
         reasoning_result = self._parse_reasoning_result_from_executor(response)
         
-        return ReasoningStep(
+        step = ReasoningStep(
             step_id=f"step_{step_index + 1}",
             description=step_plan.get('description', f"Reasoning step {step_index + 1}"),
             source_nodes=reasoning_result.get('source_nodes', []),
@@ -754,8 +766,11 @@ class ReasonerAgent(BaseAgent):
             edges=reasoning_result.get('edges', []),
             reasoning=reasoning_result.get('reasoning', response.answer),
             confidence=response.confidence,
-            step_type=step_plan.get('reasoning_type', 'inference')
+            step_type=step_plan.get('reasoning_type', 'inference'),
+            tokens_used=response.tokens_used
         )
+        
+        return step, response.tokens_used
     
     def _format_edge_display(self, edges, max_edges=10):
         """Format edges for display in prompts"""
@@ -1013,13 +1028,16 @@ class VerifierAgent(BaseAgent):
             )
             
             # Use shared singleton executor instead of creating new instance
-            temp_executor = LLMExecutor.get_instance()
+            temp_executor = self.executor
             
             # Use temporary executor to execute verification task
             response = temp_executor.execute(verification_task, verification_context)
             
             # Parse verification result from executor response
             verification_result = self._parse_verification_result_from_executor(response)
+            
+            # Add tokens to the verification result
+            verification_result.tokens_used = response.tokens_used
             
             self._log_execution(f"Verification completed, result: {'Passed' if verification_result.is_valid else 'Issues Found'}")
             
@@ -1307,13 +1325,16 @@ class SummarizerAgent(BaseAgent):
             )
             
             # Use shared singleton executor instead of creating new instance
-            temp_executor = LLMExecutor.get_instance()
+            temp_executor = self.executor
             
             # Use temporary executor to execute summarization task
             response = temp_executor.execute(summarization_task, summarization_context)
             
             # Parse summarization result from executor response
             summary_result = self._parse_summarization_result_from_executor(response)
+            
+            # Add tokens to the summary result
+            summary_result["tokens_used"] = response.tokens_used
             
             self._log_execution("Summarization completed")
             
@@ -1522,6 +1543,7 @@ class MultiAgentSystemConfig:
     # System configuration
     max_iterations: int = 3
     confidence_threshold: float = 0.7
+    enable_parallel_execution: bool = False
     
     # Logging configuration
     verbose: bool = False
@@ -1622,6 +1644,7 @@ class MultiAgentSystem:
         # Create execution config with the specific model
         execution_config = ExecutionConfig(
             model_name=final_model_name,
+            model_provider=agent_config.execution_config.model_provider,  # Preserve provider setting
             temperature=agent_config.execution_config.temperature,
             max_tokens=agent_config.execution_config.max_tokens,
             timeout=agent_config.execution_config.timeout,
@@ -1652,6 +1675,9 @@ class MultiAgentSystem:
             
             # Calculate execution time
             execution_time = time.time() - start_time
+            
+            # Get total tokens from context
+            total_tokens = response.get('total_tokens', 0)
             
             # Build final response
             multi_agent_response = MultiAgentResponse(
@@ -1685,29 +1711,34 @@ class MultiAgentSystem:
             )
     
     def _execute_agent_pipeline(self, context: Dict[str, Any]) -> Dict[str, Any]:
-        """Execute agent collaboration pipeline"""
+        """Execute agent collaboration pipeline with optimized execution"""
         max_iterations = self.config.max_iterations
         confidence_threshold = self.config.confidence_threshold
+        total_tokens = 0
         
         for iteration in range(max_iterations):
             context['iteration'] = iteration
             self.logger.info(f"Starting iteration {iteration + 1}")
             
-            # 1. Planning stage
-            planner_output = self._execute_planner(context)
+            # Stage 1: Planning (independent)
+            planner_output, tokens = self._execute_planner(context)
             context['planner_output'] = planner_output
+            total_tokens += tokens
             
-            # 2. Retrieval stage
-            retriever_output = self._execute_retriever(context)
+            # Stage 2: Retrieval (depends on planner)
+            retriever_output, tokens = self._execute_retriever(context)
             context['retriever_output'] = retriever_output
+            total_tokens += tokens
             
-            # 3. Reasoning stage
-            reasoner_output = self._execute_reasoner(context)
+            # Stage 3: Reasoning (depends on planner + retriever)
+            reasoner_output, tokens = self._execute_reasoner(context)
             context['reasoner_output'] = reasoner_output
+            total_tokens += tokens
             
-            # 4. Verification stage
-            verifier_output = self._execute_verifier(context)
+            # Stage 4: Verification (depends on planner + retriever + reasoner)
+            verifier_output, tokens = self._execute_verifier(context)
             context['verifier_output'] = verifier_output
+            total_tokens += tokens
             
             # Check if iteration is needed
             if verifier_output.is_valid and verifier_output.confidence >= confidence_threshold:
@@ -1719,52 +1750,68 @@ class MultiAgentSystem:
                 self.logger.info(f"Verification failed, adjusting based on suggestions: {verifier_output.suggestions}")
                 context = self._apply_verification_suggestions(context, verifier_output.suggestions)
         
-        # 5. Summarization stage
-        summarizer_output = self._execute_summarizer(context)
+        # Stage 5: Summarization (depends on all previous stages)
+        summarizer_output, tokens = self._execute_summarizer(context)
         context['summarizer_output'] = summarizer_output
+        total_tokens += tokens
+        
+        # Store total tokens in context
+        context['total_tokens'] = total_tokens
         
         return context
     
-    def _execute_planner(self, context: Dict[str, Any]) -> Dict[str, Any]:
+    def _execute_planner(self, context: Dict[str, Any]) -> Tuple[Dict[str, Any], int]:
         """Execute planning agent"""
         task = context['task']
-        return self.agents[AgentRole.PLANNER].execute(task, context)
+        result = self.agents[AgentRole.PLANNER].execute(task, context)
+        tokens = result.get('tokens_used', 0) if isinstance(result, dict) else 0
+        return result, tokens
     
-    def _execute_retriever(self, context: Dict[str, Any]) -> SubgraphInfo:
+    def _execute_retriever(self, context: Dict[str, Any]) -> Tuple[SubgraphInfo, int]:
         """Execute retrieval agent"""
         task = context['task']
         graph = context.get('graph')
         
         # Check if retriever agent exists
         if AgentRole.RETRIEVER in self.agents:
-            return self.agents[AgentRole.RETRIEVER].execute(task, {'graph': graph, 'planner_output': context.get('planner_output', {})})
+            result = self.agents[AgentRole.RETRIEVER].execute(task, {'graph': graph, 'planner_output': context.get('planner_output', {})})
+            tokens = getattr(result, 'tokens_used', 0) if hasattr(result, 'tokens_used') else 0
+            return result, tokens
         else:
             # Return empty subgraph info if retriever agent is disabled
             from .retrievers import RetrievalResult
-            return SubgraphInfo(
+            empty_result = SubgraphInfo(
                 nodes=[],
                 edges=[],
                 relevance_score=0.0,
                 coverage_score=0.0,
                 reasoning="Retriever agent is disabled (no_rag mode)"
             )
+            return empty_result, 0
     
-    def _execute_reasoner(self, context: Dict[str, Any]) -> List[ReasoningStep]:
+    def _execute_reasoner(self, context: Dict[str, Any]) -> Tuple[List[ReasoningStep], int]:
         """Execute reasoning agent"""
         task = context['task']
-        return self.agents[AgentRole.REASONER].execute(task, context)
+        result = self.agents[AgentRole.REASONER].execute(task, context)
+        # Extract tokens from the first reasoning step (where we stored total tokens)
+        tokens = result[0].tokens_used if result and hasattr(result[0], 'tokens_used') else 0
+        return result, tokens
     
-    def _execute_verifier(self, context: Dict[str, Any]) -> VerificationResult:
+    def _execute_verifier(self, context: Dict[str, Any]) -> Tuple[VerificationResult, int]:
         """Execute verification agent"""
         task = context['task']
         graph = context.get('graph')
-        return self.agents[AgentRole.VERIFIER].execute(task, {'graph': graph, 'planner_output': context.get('planner_output', {}), 'retriever_output': context.get('retriever_output'), 'reasoner_output': context.get('reasoner_output', [])})
+        result = self.agents[AgentRole.VERIFIER].execute(task, {'graph': graph, 'planner_output': context.get('planner_output', {}), 'retriever_output': context.get('retriever_output'), 'reasoner_output': context.get('reasoner_output', [])})
+        tokens = result.tokens_used if hasattr(result, 'tokens_used') else 0
+        return result, tokens
     
-    def _execute_summarizer(self, context: Dict[str, Any]) -> Dict[str, Any]:
+    def _execute_summarizer(self, context: Dict[str, Any]) -> Tuple[Dict[str, Any], int]:
         """Execute summarization agent"""
         task = context['task']
         graph = context.get('graph')
-        return self.agents[AgentRole.SUMMARIZER].execute(task, {'graph': graph, 'planner_output': context.get('planner_output', {}), 'retriever_output': context.get('retriever_output'), 'reasoner_output': context.get('reasoner_output', []), 'verifier_output': context.get('verifier_output')})
+        result = self.agents[AgentRole.SUMMARIZER].execute(task, {'graph': graph, 'planner_output': context.get('planner_output', {}), 'retriever_output': context.get('retriever_output'), 'reasoner_output': context.get('reasoner_output', []), 'verifier_output': context.get('verifier_output')})
+        tokens = result.get('tokens_used', 0) if isinstance(result, dict) else 0
+        return result, tokens
     
     def _apply_verification_suggestions(self, context: Dict[str, Any], suggestions: List[str]) -> Dict[str, Any]:
         """Adjust context based on verification suggestions"""
@@ -1847,13 +1894,15 @@ def create_multi_agent_system(
             continue
         
         # Create execution config for this agent
+        model_config = role_config.get('model', {})
         execution_config = ExecutionConfig(
-            model_name=role_config.get('model_name', 'gpt-4o-mini'),
-            temperature=role_config.get('temperature', 0.1),
-            max_tokens=role_config.get('max_tokens', 1000),
-            timeout=role_config.get('timeout', 30),
-            max_retries=role_config.get('max_retries', 3),
-            response_format=role_config.get('response_format', 'json')
+            model_name=model_config.get('model_name', 'gpt-4o-mini'),
+            model_provider=model_config.get('model_provider', 'openai'),
+            temperature=model_config.get('temperature', 0.1),
+            max_tokens=model_config.get('max_tokens', 1000),
+            timeout=model_config.get('timeout', 30),
+            max_retries=model_config.get('max_retries', 3),
+            response_format=model_config.get('response_format', 'json')
         )
         
         # Create retrieval config for this agent
@@ -1866,11 +1915,12 @@ def create_multi_agent_system(
         )
         
         # Create agent config
+        agent_sub_config = role_config.get('agent', {})
         agent_configs[role] = AgentConfig(
             execution_config=execution_config,
             retrieval_config=retrieval_config,
-            enable_evaluation=role_config.get('enable_evaluation', system_config.get('enable_evaluation', True)),
-            verbose=role_config.get('verbose', system_config.get('verbose', False))
+            enable_evaluation=agent_sub_config.get('enable_evaluation', system_config.get('enable_evaluation', True)),
+            verbose=agent_sub_config.get('verbose', system_config.get('verbose', False))
         )
     
     # Create multi-agent system configuration
@@ -1928,7 +1978,7 @@ def create_multi_agent_system_from_config(
             execution_config=ExecutionConfig(model_name="gpt-4", temperature=0.1)
         )
         retriever_config = AgentConfig(
-            execution_config=ExecutionConfig(model_name="gpt-3.5-turbo", temperature=0.0)
+            execution_config=ExecutionConfig(model_name="gpt-4o-mini", temperature=0.0)
         )
         
         # Create system

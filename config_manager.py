@@ -55,8 +55,8 @@ class ConfigManager:
     def __init__(self, config_dir: str = "configs"):
         self.config_dir = Path(config_dir)
         self.config = None
-        # Load .env file first
-        self._load_env_file()
+        # Load .env file first and store as instance variable
+        self._env_vars = self._load_env_file()
         self._load_all_configs()
         self._load_environment_variables()
     
@@ -105,13 +105,22 @@ class ConfigManager:
             return {}
     
     def _load_env_file(self):
-        """Load environment variables from .env file"""
+        """Load environment variables from .env file and return as dictionary"""
         env_file = Path(".env")
+        env_vars = {}
+        
         if env_file.exists():
-            load_dotenv(env_file)
-            log_info("Loaded environment variables from .env file")
+            # Use load_dotenv to load into system environment variables
+            load_dotenv(env_file, override=True)
+            
+            # Read from system environment variables into dictionary
+            env_vars = dict(os.environ)
+            log_info("Loaded environment variables from .env file using load_dotenv")
         else:
             log_warning(".env file not found, using system environment variables")
+            env_vars = dict(os.environ)
+        
+        return env_vars
     
     def _create_default_config(self):
         """Create default configuration"""
@@ -148,21 +157,42 @@ class ConfigManager:
         )
     
     def _load_environment_variables(self):
-        """Load sensitive configuration from environment variables"""
+        """Load sensitive configuration from .env file variables"""
         
-        # API keys and URLs
+        # API keys and URLs - read from loaded .env file content
         if self.config.apis.get("openai"):
-            self.config.apis["openai"]["api_key"] = os.getenv("OPENAI_API_KEY")
-            self.config.apis["openai"]["base_url"] = os.getenv("OPENAI_BASE_URL")
-            self.config.apis["openai"]["organization"] = os.getenv("OPENAI_ORGANIZATION")
+            self.config.apis["openai"]["api_key"] = self._env_vars.get("OPENAI_API_KEY")
+            self.config.apis["openai"]["base_url"] = self._env_vars.get("OPENAI_BASE_URL")
+            self.config.apis["openai"]["organization"] = self._env_vars.get("OPENAI_ORGANIZATION")
             
         if self.config.apis.get("anthropic"):
-            self.config.apis["anthropic"]["api_key"] = os.getenv("ANTHROPIC_API_KEY")
-            self.config.apis["anthropic"]["base_url"] = os.getenv("ANTHROPIC_BASE_URL")
+            self.config.apis["anthropic"]["api_key"] = self._env_vars.get("ANTHROPIC_API_KEY")
+            self.config.apis["anthropic"]["base_url"] = self._env_vars.get("ANTHROPIC_BASE_URL")
             
         if self.config.apis.get("huggingface"):
-            self.config.apis["huggingface"]["api_key"] = os.getenv("HUGGINGFACE_API_KEY")
-            self.config.apis["huggingface"]["cache_dir"] = os.getenv("HUGGINGFACE_CACHE_DIR", "models/huggingface")
+            self.config.apis["huggingface"]["api_key"] = self._env_vars.get("HUGGINGFACE_API_KEY")
+            self.config.apis["huggingface"]["cache_dir"] = self._env_vars.get("HUGGINGFACE_CACHE_DIR", "models/huggingface")
+        
+        # Add Gemini API configuration support
+        if not self.config.apis.get("gemini"):
+            self.config.apis["gemini"] = {"api_key": None, "base_url": None}
+        self.config.apis["gemini"]["api_key"] = self._env_vars.get("GOOGLE_API_KEY")
+        self.config.apis["gemini"]["base_url"] = self._env_vars.get("GEMINI_BASE_URL")
+        
+        # Add DeepSeek API configuration support
+        if not self.config.apis.get("deepseek"):
+            self.config.apis["deepseek"] = {"api_key": None, "base_url": None}
+        self.config.apis["deepseek"]["api_key"] = self._env_vars.get("DEEPSEEK_API_KEY")
+        self.config.apis["deepseek"]["base_url"] = self._env_vars.get("DEEPSEEK_BASE_URL")
+        
+        # Add Curl/HTTP API configuration support
+        if not self.config.apis.get("curl"):
+            self.config.apis["curl"] = {"api_key": None, "base_url": None}
+        self.config.apis["curl"]["api_key"] = self._env_vars.get("CURL_API_KEY")
+        self.config.apis["curl"]["base_url"] = self._env_vars.get("CURL_BASE_URL")
+        
+        # Add multi-API support configuration
+        self._setup_multi_api_config()
         
         # Environment variable overrides
         env_overrides = {
@@ -174,7 +204,7 @@ class ConfigManager:
         }
         
         for env_var, config_path in env_overrides.items():
-            env_value = os.getenv(env_var)
+            env_value = self._env_vars.get(env_var)
             if env_value is not None:
                 self._set_nested_config(config_path, env_value)
     
@@ -205,6 +235,110 @@ class ConfigManager:
         except Exception as e:
             log_warning(f"Failed to set environment variable {path}: {e}")
     
+    def _setup_multi_api_config(self):
+        """设置多API支持配置"""
+        # No longer use model mapping table, all models need explicit provider specification
+        
+        # Add get_api_config_for_model method to configuration object
+        if not hasattr(self.config, 'get_api_config_for_model'):
+            self.config.get_api_config_for_model = self.get_api_config_for_model
+        
+        # Qwen models use OpenAI-compatible API, so no separate configuration needed
+        # Only need to specify qwen provider in model mapping, then use openai configuration
+        
+        log_info("Multi-API configuration setup completed")
+    
+    def get_api_config_for_model(self, model_name: str, model_provider: str = None) -> dict:
+        """根据模型名称获取对应的API配置"""
+        # Must explicitly specify model_provider, no longer support auto mode
+        if not model_provider:
+            raise ValueError(f"model_provider must be explicitly specified for model {model_name}. Supported providers: openai, anthropic, gemini, qwen, deepseek, curl")
+        
+        api_provider = model_provider
+        log_info(f"Using explicit model provider: {api_provider} for model {model_name}")
+        
+        # Select appropriate API key and configuration based on provider
+        if api_provider == 'qwen':
+            # Qwen models: prioritize DASHSCOPE_API_KEY, otherwise use OPENAI_API_KEY
+            api_config = self.config.apis.get('openai', {}).copy()
+            qwen_api_key = self._env_vars.get("DASHSCOPE_API_KEY") or self._env_vars.get("OPENAI_API_KEY")
+            if qwen_api_key:
+                api_config['api_key'] = qwen_api_key
+            
+            # If Qwen-specific base_url is configured, use it
+            qwen_base_url = self._env_vars.get("QWEN_BASE_URL", "https://dashscope.aliyuncs.com/compatible-mode/v1")
+            if qwen_base_url:
+                api_config['base_url'] = qwen_base_url
+                
+        elif api_provider == 'gemini':
+            # Gemini models: prioritize GOOGLE_API_KEY, otherwise use OPENAI_API_KEY
+            api_config = self.config.apis.get('openai', {}).copy()
+            gemini_api_key = self._env_vars.get("GOOGLE_API_KEY") or self._env_vars.get("OPENAI_API_KEY")
+            if gemini_api_key:
+                api_config['api_key'] = gemini_api_key
+            
+            # If Gemini-specific base_url is configured, use it
+            gemini_base_url = self._env_vars.get("GEMINI_BASE_URL", "https://generativelanguage.googleapis.com/v1beta")
+            if gemini_base_url:
+                api_config['base_url'] = gemini_base_url
+                
+        elif api_provider == 'openai':
+            # OpenAI models: use OPENAI_API_KEY
+            api_config = self.config.apis.get('openai', {}).copy()
+            openai_api_key = self._env_vars.get("OPENAI_API_KEY")
+            if openai_api_key:
+                api_config['api_key'] = openai_api_key
+                
+        elif api_provider == 'anthropic':
+            # Anthropic models: use ANTHROPIC_API_KEY
+            api_config = self.config.apis.get('anthropic', {}).copy()
+            anthropic_api_key = self._env_vars.get("ANTHROPIC_API_KEY")
+            if anthropic_api_key:
+                api_config['api_key'] = anthropic_api_key
+            
+            # If Anthropic-specific base_url is configured, use it
+            anthropic_base_url = self._env_vars.get("ANTHROPIC_BASE_URL", "https://api.anthropic.com")
+            if anthropic_base_url:
+                api_config['base_url'] = anthropic_base_url
+                
+        elif api_provider == 'deepseek':
+            # DeepSeek models: use DEEPSEEK_API_KEY or OPENAI_API_KEY
+            api_config = self.config.apis.get('openai', {}).copy()
+            deepseek_api_key = self._env_vars.get("DEEPSEEK_API_KEY") or self._env_vars.get("OPENAI_API_KEY")
+            if deepseek_api_key:
+                api_config['api_key'] = deepseek_api_key
+            
+            # If DeepSeek-specific base_url is configured, use it
+            deepseek_base_url = self._env_vars.get("DEEPSEEK_BASE_URL", "https://api.deepseek.com")
+            if deepseek_base_url:
+                api_config['base_url'] = deepseek_base_url
+                
+        elif api_provider == 'curl':
+            # Curl/HTTP API: use CURL_API_KEY and CURL_BASE_URL
+            api_config = self.config.apis.get('curl', {}).copy()
+            curl_api_key = self._env_vars.get("CURL_API_KEY")
+            if curl_api_key:
+                api_config['api_key'] = curl_api_key
+            
+            # If Curl-specific base_url is configured, use it
+            curl_base_url = self._env_vars.get("CURL_BASE_URL")
+            if curl_base_url:
+                api_config['base_url'] = curl_base_url
+                
+        else:
+            # Other providers use default configuration
+            api_config = self.config.apis.get(api_provider, {})
+        
+        if not api_config.get('api_key'):
+            raise ValueError(f"No API key configured for {api_provider}")
+        
+        return {
+            'provider': api_provider,
+            'api_key': api_config.get('api_key'),
+            'base_url': api_config.get('base_url'),
+            'organization': api_config.get('organization')
+        }
+    
     def get_config(self) -> BenchmarkConfig:
         """Get complete configuration"""
         return self.config
@@ -218,17 +352,17 @@ class ConfigManager:
         issues = []
         warnings = []
         
-        # 检查API密钥
+        # Check API keys
         if not self.config.apis.get("openai", {}).get("api_key") and not self.config.apis.get("anthropic", {}).get("api_key"):
             warnings.append("没有设置LLM API密钥，将使用模拟模式")
         
-        # 检查路径
+        # Check paths
         for path_name, path_value in self.config.paths.items():
             path_obj = Path(path_value)
             if not path_obj.parent.exists():
                 warnings.append(f"路径的父目录不存在: {path_value}")
         
-        # 检查数值范围
+        # Check numerical ranges
         if hasattr(self.config, 'agent') and isinstance(self.config.agent, dict):
             execution_config = self.config.agent.get('execution', {})
             temperature = execution_config.get('temperature', 0.1)

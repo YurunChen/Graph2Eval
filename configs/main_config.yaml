@@ -32,9 +32,9 @@ benchmark:
   stage_control:
     run_until: evaluation
   task_execution:
-    max_normal_tasks: 10
+    max_normal_tasks: 100
     max_safety_tasks: 10
-    max_total_tasks: 20
+    max_total_tasks: 100
 global:
   random_seed: 42
 includes:
@@ -54,6 +54,8 @@ orchestration:
     log_dir: logs
     log_level: DEBUG
     save_logs: true
+    save_individual_task_results: true # save individual task results after each completion
+    real_time_write: true  # Enable real-time log writing (disable buffering)
   output:
     base_dir: output # benchmark output directory
     save_benchmark_results: true # save benchmark results to base_dir

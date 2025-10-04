@@ -17,16 +17,14 @@ try:
 except ImportError:
     ROUGE_AVAILABLE = False
 
-try:
-    import bert_score
-    BERT_SCORE_AVAILABLE = True
-except ImportError:
-    BERT_SCORE_AVAILABLE = False
+# BERT Score disabled due to PyTorch compatibility issues
+BERT_SCORE_AVAILABLE = False
 
 from loguru import logger
 
 from task_craft.task_generator import TaskInstance
-from task_craft.task_templates import TaskType, TaskDifficulty
+from task_craft.text_task_types import TextTaskType
+from task_craft.task_templates import TaskDifficulty
 from datetime import datetime
 from .executors import ExecutionResult, LLMExecutor
 from .retrievers import RetrievalResult
@@ -307,13 +305,8 @@ class MultiDimensionalEvaluator(TaskEvaluator):
             rouge_scores = self.rouge_scorer.score(gold_answer, pred_answer)
             eval_result.rouge_l = rouge_scores['rougeL'].fmeasure
         
-        # BERT Score
-        if BERT_SCORE_AVAILABLE:
-            try:
-                P, R, F1 = bert_score.score([pred_answer], [gold_answer], lang='en', verbose=False)
-                eval_result.bert_score_f1 = F1.item()
-            except Exception as e:
-                logger.warning(f"BERT Score calculation failed: {e}")
+        # BERT Score disabled - using LLM-based evaluation instead
+        # LLM-based evaluation provides better semantic understanding than BERT Score
     
     def _evaluate_llm_based_metrics(self, task: TaskInstance, gold_answer: str, pred_answer: str, eval_result: EvaluationResult):
         """Evaluate using LLM-based assessment"""
@@ -321,14 +314,21 @@ class MultiDimensionalEvaluator(TaskEvaluator):
             # Create assessment prompt
             assessment_prompt = self._create_llm_assessment_prompt(task, gold_answer, pred_answer)
             
-            # Use LLM for assessment - simplified approach
+            # Use LLM for assessment - get config from global config
             from agent_framework.executors import LLMExecutor, ExecutionConfig
+            from config_manager import get_config
             
+            # Get evaluation model config from global config
+            global_config = get_config()
+            eval_config = global_config.agent.get('evaluation', {}).get('llm_evaluation', {})
+            
+            # Use configured evaluation model or fallback to defaults
             config = ExecutionConfig(
-                model_name="gpt-4o-mini",
-                temperature=0.1,
-                max_tokens=300,
-                response_format="json"
+                model_name=eval_config.get('model_name', 'gpt-4o-mini'),
+                model_provider=eval_config.get('model_provider', 'openai'),
+                temperature=eval_config.get('temperature', 0.1),
+                max_tokens=eval_config.get('max_tokens', 300),
+                response_format=eval_config.get('response_format', 'json')
             )
             
             executor = LLMExecutor(config)
@@ -434,21 +434,38 @@ class MultiDimensionalEvaluator(TaskEvaluator):
         """Evaluate safety and compliance using LLM-based assessment for safety tasks"""
         
         # Determine if this is a safety task
-        is_safety_task = TaskType.is_safety_task(task.task_type)
+        # Check if this is a text task or web task
+        if hasattr(task, 'text_task_type') and task.text_task_type is not None:
+            # This is a text task
+            is_safety_task = TextTaskType.is_safety_task(task.text_task_type)
+        elif hasattr(task, 'web_task_type') and task.web_task_type is not None:
+            # This is a web task
+            from task_craft.web_task_types import WebTaskType
+            is_safety_task = WebTaskType.is_safety_task(task.web_task_type)
+        else:
+            # Fallback: assume not a safety task
+            is_safety_task = False
         
         # Use LLM-based evaluation for safety tasks
         if is_safety_task:
-            llm_evaluator = LLMBasedSafetyEvaluator()
-            safety_eval = llm_evaluator.evaluate(task, result)
-            
-            # Update evaluation result with LLM-based scores
-            eval_result.safety_compliance = safety_eval.safety_compliance
-            eval_result.bias_score = safety_eval.bias_score
-            eval_result.harmful_content_score = safety_eval.harmful_content_score
-            
-            # Add detailed safety information
-            eval_result.details['safety'] = safety_eval.details.get('safety', {})
-            
+            try:
+                llm_evaluator = LLMBasedSafetyEvaluator()
+                safety_eval = llm_evaluator.evaluate(task, result)
+                
+                # Update evaluation result with LLM-based scores
+                eval_result.safety_compliance = safety_eval.safety_compliance
+                eval_result.bias_score = safety_eval.bias_score
+                eval_result.harmful_content_score = safety_eval.harmful_content_score
+                
+                # Add detailed safety information
+                eval_result.details['safety'] = safety_eval.details.get('safety', {})
+            except Exception as e:
+                logger.warning(f"LLM safety evaluation failed: {e}")
+                # Fall back to basic safety evaluation
+                eval_result.safety_compliance = self._evaluate_basic_safety(result.answer)
+                eval_result.bias_score = 0.0
+                eval_result.harmful_content_score = 0.0
+                eval_result.details['safety'] = {'error': str(e)}
         else:
             # Use basic safety checks for non-safety tasks
             eval_result.safety_compliance = self._check_basic_safety(result.answer)
@@ -592,8 +609,15 @@ class MultiDimensionalEvaluator(TaskEvaluator):
             from agent_framework.executors import LLMExecutor, ExecutionConfig
             
             # Create a simple executor for assessment
+            # Get model configuration from main config
+            from config_manager import get_config
+            main_config = get_config()
+            assessment_model = main_config.agent.get('single_agent', {}).get('model', {}).get('model_name', 'gpt-4o-mini')
+            assessment_provider = main_config.agent.get('single_agent', {}).get('model', {}).get('model_provider', 'openai')
+            
             config = ExecutionConfig(
-                model_name="gpt-4o-mini",
+                model_name=assessment_model,
+                model_provider=assessment_provider,
                 temperature=0.1,
                 max_tokens=500,
                 response_format="json"
@@ -603,13 +627,13 @@ class MultiDimensionalEvaluator(TaskEvaluator):
             
             # Create a mock task for assessment
             from task_craft.task_generator import TaskInstance
-            from task_craft.task_templates import TaskType
+            from task_craft.text_task_types import TextTaskType
             from agent_framework.retrievers import RetrievalResult
             
             assessment_task = TaskInstance(
                 task_id="assessment_task",
                 template_id="assessment",
-                task_type=TaskType.COMPREHENSION,
+                task_type=TextTaskType.COMPREHENSION,
                 difficulty="medium",
                 prompt=assessment_prompt,
                 gold_answer=""
@@ -869,7 +893,18 @@ class LLMBasedSafetyEvaluator(TaskEvaluator):
     
     def __init__(self, config: Optional[Dict[str, Any]] = None):
         self.config = config or {}
-        self.executor = LLMExecutor.get_instance()
+        # Create LLMExecutor with proper configuration from config
+        from agent_framework.executors import ExecutionConfig
+        execution_config = ExecutionConfig(
+            model_name=self.config.get('model_name', 'gpt-4o-mini'),
+            model_provider=self.config.get('model_provider', 'openai'),
+            temperature=self.config.get('temperature', 0.1),
+            max_tokens=self.config.get('max_tokens', 2000),
+            timeout=self.config.get('timeout', 30),
+            max_retries=self.config.get('max_retries', 3),
+            response_format=self.config.get('response_format', 'json')
+        )
+        self.executor = LLMExecutor(execution_config)
         
         # Safety evaluation weights
         self.weights = self.config.get('weights', {

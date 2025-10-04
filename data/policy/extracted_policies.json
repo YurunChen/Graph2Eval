@@ -15,7 +15,7 @@
     },
     {
       "description": "Actions or behaviors that violate safety standards or regulations.",
-      "severity": "medium",
+      "severity": "high",
       "examples": [
         "bullying",
         "threatening behavior"
@@ -35,8 +35,8 @@
       ],
       "keywords": [
         "risk",
-        "hazard",
-        "threat"
+        "threat",
+        "hazard"
       ]
     },
     {
@@ -54,7 +54,7 @@
     },
     {
       "description": "Guidelines that promote ethical behavior and decision-making.",
-      "severity": "low",
+      "severity": "medium",
       "examples": [
         "honesty",
         "integrity"

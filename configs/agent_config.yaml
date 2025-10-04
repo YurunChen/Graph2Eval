@@ -21,136 +21,202 @@
 # Multi-agent specific settings are under multi_agent section
 
 # Agent configuration options
-agent_mode: single      # Available modes: [single, multi, web]
-agent_type: rag      # Type options: [no_rag, rag] 
-                        # Note: Controls retrieval capabilities in all modes
-                        # Web agent does not support this functionality
+agent_mode: single     # Available modes: [single, multi, web]
+agent_type: no_rag  # Type options: [no_rag, rag, agent_s, som_agent] 
+                        # Note: agent_s and som_agent are web agent types (use with agent_mode: web)
+                        # no_rag and rag are for single/multi agent modes
 
-# Common execution settings (shared by all agents)
-execution:
-  max_context_length: 4000
-  max_retries: 3
-  max_tokens: 4000
-  model_name: gpt-4o-mini
-  require_citations: true
-  require_reasoning: true
-  response_format: json # structured, json
-  retry_delay: 1.0
-  temperature: 0.1
-  timeout: 30
+# Global evaluation settings (applies to all agent types)
+evaluation:
+  enable_concurrent: true  # Enable concurrent evaluation for better performance
+  max_workers: 8  # Maximum number of concurrent evaluation workers
+  batch_size: 100  # Process tasks in batches for better memory management
+  progress_bar: true  # Show progress bar during evaluation
   
-  # Image processing support
-  support_images: true
-
-# Common retrieval settings (used by RAG agents)
-retrieval:
-  expand_with_context: true
-  include_neighbors: true
-  max_hops: 3
-  max_nodes: 10
-  prefer_gold_nodes: true
-  similarity_threshold: 0.7
-
-# Common system settings
-system:
-  enable_evaluation: true
-  enable_memory: true
-  memory_size: 10
-  verbose: false
-  log_intermediate: false
+  # LLM-based evaluation model configuration
+  llm_evaluation:
+    model_name: gpt-4o-mini  # Model used for LLM-based quality assessment
+    model_provider: openai   # Provider for evaluation model
+    temperature: 0.1         # Temperature for evaluation model
+    max_tokens: 300          # Max tokens for evaluation responses
+    response_format: json    # Response format for evaluation
 
 
+
+# Single Agent configuration (used when agent_mode is "single")
+single_agent:
+  # Model Configuration
+  model:
+    model_name: gpt-4o-mini  # Model used for single agent execution
+    model_provider: openai   # Provider for execution model
+    temperature: 0.1         # Temperature for LLM calls
+    max_tokens: 4000         # Maximum tokens per response
+    timeout: 30              # Request timeout
+    max_retries: 2           # Maximum retries for failed LLM calls
+    response_format: structured  # Response format: structured, json, text
+  
+  # Agent Configuration
+  agent:
+    enable_evaluation: true  # Enable self-evaluation
+    enable_memory: true      # Enable memory system
+    memory_size: 10          # Memory buffer size
+    verbose: false           # Verbose logging
+    log_intermediate: false  # Log intermediate results
+
+  # Retrieval configuration (used by RAG agents)
+  retrieval:
+    max_nodes: 10            # Maximum nodes to retrieve
+    max_hops: 2              # Maximum hops for retrieval
+    similarity_threshold: 0.7  # Similarity threshold for retrieval
+    include_neighbors: true  # Include neighboring nodes
+    expand_with_context: true  # Expand with context
+    prefer_gold_nodes: true  # Prefer gold nodes
 
 # Multi-agent system configuration (only used when agent_mode is multi)
 # Agent roles are automatically enabled/disabled based on agent_type
 multi_agent:
   # System-level configuration
-  max_iterations: 3
+  max_iterations: 1
   confidence_threshold: 0.7
   verbose: true
+  enable_parallel_execution: false  # Enable parallel execution where possible
   
   # Agent roles and their configurations
   # Note: retriever agent is automatically disabled when agent_type is "no_rag"
   agents:
     planner:
-      model_name: gpt-4o-mini
-      temperature: 0.1
-      max_tokens: 1000
-      timeout: 30
-      max_retries: 3
-      response_format: json
+      # Model Configuration
+      model:
+        model_name:  gpt-4.1-mini  # Model used for planning agent
+        model_provider: openai   # Provider for planning model
+        temperature: 0.1         # Temperature for LLM calls
+        max_tokens: 2000         # Maximum tokens per response
+        timeout: 20              # Request timeout
+        max_retries: 2           # Maximum retries for failed LLM calls
+        response_format: json    # Response format
+      
+      # Agent Configuration
+      agent:
+        enable_evaluation: true  # Enable self-evaluation
+        verbose: false           # Verbose logging
+      
+      # Retrieval Configuration
       retrieval:
-        max_nodes: 10
-        max_hops: 3
-        similarity_threshold: 0.7
-      enable_evaluation: true
-      verbose: false
+        max_nodes: 8            # Maximum nodes to retrieve
+        max_hops: 2             # Maximum hops for retrieval
+        similarity_threshold: 0.7  # Similarity threshold for retrieval
     
     retriever:
       # This agent is automatically disabled when agent_type is "no_rag"
-      model_name: gpt-4o-mini
-      temperature: 0.0
-      max_tokens: 500
-      timeout: 30
-      max_retries: 3
-      response_format: json
+      # Model Configuration
+      model:
+        model_name: gpt-4.1-mini  # Model used for retrieval agent
+        model_provider: openai   # Provider for retrieval model
+        temperature: 0.0         # Temperature for LLM calls
+        max_tokens: 2000         # Maximum tokens per response
+        timeout: 20              # Request timeout
+        max_retries: 2           # Maximum retries for failed LLM calls
+        response_format: json    # Response format
+      
+      # Agent Configuration
+      agent:
+        enable_evaluation: true  # Enable self-evaluation
+        verbose: false           # Verbose logging
+      
+      # Retrieval Configuration
       retrieval:
-        max_nodes: 15
-        max_hops: 2
-        similarity_threshold: 0.8
-      enable_evaluation: true
-      verbose: false
+        max_nodes: 10           # Maximum nodes to retrieve
+        max_hops: 2             # Maximum hops for retrieval
+        similarity_threshold: 0.8  # Similarity threshold for retrieval
     
     reasoner:
-      model_name: gpt-4o-mini
-      temperature: 0.1
-      max_tokens: 1500
-      timeout: 30
-      max_retries: 3
-      response_format: json
+      # Model Configuration
+      model:
+        model_name: gpt-4.1-mini  # Model used for reasoning agent
+        model_provider: openai   # Provider for reasoning model
+        temperature: 0.1         # Temperature for LLM calls
+        max_tokens: 2000         # Maximum tokens per response
+        timeout: 20              # Request timeout
+        max_retries: 2           # Maximum retries for failed LLM calls
+        response_format: json    # Response format
+      
+      # Agent Configuration
+      agent:
+        enable_evaluation: true  # Enable self-evaluation
+        verbose: false           # Verbose logging
+      
+      # Retrieval Configuration
       retrieval:
-        max_nodes: 10
-        max_hops: 3
-        similarity_threshold: 0.7
-      enable_evaluation: true
-      verbose: false
+        max_nodes: 8            # Maximum nodes to retrieve
+        max_hops: 2             # Maximum hops for retrieval
+        similarity_threshold: 0.7  # Similarity threshold for retrieval
     
     verifier:
-      model_name: gpt-4o-mini
-      temperature: 0.0
-      max_tokens: 800
-      timeout: 30
-      max_retries: 3
-      response_format: json
+      # Model Configuration
+      model:
+        model_name: gpt-4.1-mini  # Model used for verification agent
+        model_provider: openai   # Provider for verification model
+        temperature: 0.0         # Temperature for LLM calls
+        max_tokens: 2000         # Maximum tokens per response
+        timeout: 20              # Request timeout
+        max_retries: 2           # Maximum retries for failed LLM calls
+        response_format: json    # Response format
+      
+      # Agent Configuration
+      agent:
+        enable_evaluation: true  # Enable self-evaluation
+        verbose: false           # Verbose logging
+      
+      # Retrieval Configuration
       retrieval:
-        max_nodes: 8
-        max_hops: 2
-        similarity_threshold: 0.8
-      enable_evaluation: true
-      verbose: false
+        max_nodes: 8            # Maximum nodes to retrieve
+        max_hops: 2             # Maximum hops for retrieval
+        similarity_threshold: 0.8  # Similarity threshold for retrieval
     
     summarizer:
-      model_name: gpt-4o-mini
-      temperature: 0.1
-      max_tokens: 1200
-      timeout: 30
-      max_retries: 3
-      response_format: json
+      # Model Configuration
+      model:
+        model_name: gpt-4.1-mini  # Model used for summarization agent
+        model_provider: openai   # Provider for summarization model
+        temperature: 0.1         # Temperature for LLM calls
+        max_tokens: 2500         # Maximum tokens per response
+        timeout: 20              # Request timeout
+        max_retries: 2           # Maximum retries for failed LLM calls
+        response_format: json    # Response format
+      
+      # Agent Configuration
+      agent:
+        enable_evaluation: true  # Enable self-evaluation
+        verbose: false           # Verbose logging
+      
+      # Retrieval Configuration
       retrieval:
-        max_nodes: 10
-        max_hops: 2
-        similarity_threshold: 0.7
-      enable_evaluation: true
-      verbose: false
-
+        max_nodes: 8            # Maximum nodes to retrieve
+        max_hops: 2             # Maximum hops for retrieval
+        similarity_threshold: 0.7  # Similarity threshold for retrieval
 
 # Web Agent configuration (used when agent_mode is "web")
 web_agent:
+  # Model Configuration
+  model:
+    model_name: gpt-4o-mini  # Model used for web agent execution
+    model_provider: openai   # Provider for execution model
+    temperature: 0.1         # Temperature for LLM calls
+    max_tokens: 4000         # Maximum tokens per response
+    timeout: 30              # Request timeout
+    max_retries: 5           # Maximum retries for failed LLM calls
+  
   # Browser Automation Configuration
-  use_browser: true  # Enable real browser automation
-  headless: true     # Run browser in headless mode
-  timeout: 30        # Page load timeout
-  wait_time: 1.0     # Wait time between actions
+  browser:
+    use_browser: true  # Enable real browser automation
+    headless: true     # Run browser in headless mode
+    timeout: 30        # Page load timeout
+    wait_time: 1.0     # Wait time between actions
+    max_iterations: 8  # Maximum number of execution iterations to prevent infinite loops (reduced for cost optimization)
+  
+  # Token and Cost Control
+  max_tokens_per_response: 45000  # Maximum tokens per LLM response to control costs (increased due to SoM analysis)
+  max_tokens_per_task: 180000     # Maximum total tokens per task to prevent excessive costs (increased for complex tasks)
   
   # Web Evaluator Configuration
   evaluator:
@@ -160,5 +226,49 @@ web_agent:
     behavior_similarity_weight: 0.2
     success_threshold: 0.7
   
+  # Self-validation model configuration (separate from execution model)
+  validation:
+    model_name: gpt-4o-mini  # Model used for task completion validation
+    model_provider: openai   # Provider for validation model
+    temperature: 0.0         # Lower temperature for more consistent validation
+    max_tokens: 500          # More tokens for detailed validation
+    response_format: json    # Response format for validation
 
+# Agent S Web configuration (used when agent_type is "agent_s")
+# This now uses Agent S 2.5 implementation with simplified architecture
+agent_s_web:
+  # Model Configuration
+  model:
+    model_name: qwen2.5-vl-7b-instruct  # Model used for Agent S 2.5 execution
+    model_provider: qwen   # Provider for execution model
+    temperature: 0.1         # Temperature for LLM calls
+    max_tokens: 4000         # Maximum tokens per response
+    timeout: 30              # Request timeout
+    max_retries: 5           # Maximum retries for failed LLM calls
+  
+  # Browser Automation Configuration
+  browser:
+    headless: true     # Run browser in headless mode
+    use_browser: true  # Enable real browser automation
+    timeout: 30        # Page load timeout
+  
+  # Agent S 2.5 Configuration
+  agent:
+    max_trajectory_length: 8        # Maximum number of image turns to keep
+    enable_reflection: true         # Enable reflection agent
+    text_only_mode: true           # If true, disable image processing to reduce costs
+  
+  # Execution parameters (model config is in the model section above)
+  execution:
+    max_steps: 20                   # Maximum steps per task
+    step_wait_time: 1.0             # Wait time between steps
+    max_execution_time: 300         # Maximum execution time per task (seconds)
+  
+  # Self-validation model configuration (separate from execution model)
+  validation:
+    model_name: gpt-4o-2024-08-06  # Model used for task completion validation (cheaper than gpt-4o)
+    model_provider: openai   # Provider for validation model
+    temperature: 0.0         # Lower temperature for more consistent validation
+    max_tokens: 1000         # Reduced tokens for cost optimization
+    response_format: json    # Response format for validation
 

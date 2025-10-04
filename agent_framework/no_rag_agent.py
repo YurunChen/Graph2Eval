@@ -16,7 +16,8 @@ from task_craft.task_generator import TaskInstance
 @dataclass
 class NoRAGAgentConfig:
     """No-RAG Agent配置"""
-    model_name: str = "gpt-4o-mini"
+    model_name: str = "qwen2.5-vl-7b-instruct"  # Use default from config
+    model_provider: str = "qwen"  # Use default from config
     temperature: float = 0.1
     max_tokens: int = 1000
     timeout: int = 30
@@ -57,9 +58,10 @@ class NoRAGAgent:
             self.executor = executor
             logger.info(f"🤖 No-RAG Agent using provided executor: {executor.config.model_name}")
         else:
-            # Initialize executor - use shared singleton instance
+            # Initialize executor with correct configuration
             execution_config = ExecutionConfig(
                 model_name=config.model_name,
+                model_provider=config.model_provider,
                 temperature=config.temperature,
                 max_tokens=config.max_tokens,
                 timeout=config.timeout,
@@ -69,8 +71,8 @@ class NoRAGAgent:
                 response_format=config.response_format,
                 max_context_length=config.max_context_length
             )
-            self.executor = LLMExecutor.get_instance(execution_config)
-            logger.info(f"🤖 No-RAG Agent initialized with model: {config.model_name}")
+            self.executor = LLMExecutor(execution_config)
+            logger.info(f"🤖 No-RAG Agent initialized with model: {config.model_name}, response_format: {config.response_format}")
         
         # Initialize evaluator if enabled
         if self.config.enable_evaluation:
@@ -100,6 +102,11 @@ class NoRAGAgent:
                 retrieval_method="no_rag",
                 total_nodes_considered=0
             )
+            
+            # 对于NoRAG agent，禁用引用要求（因为没有可引用的来源）
+            # 但保留推理要求（因为推理是LLM的内在能力）
+            if hasattr(task, 'requires_citations'):
+                task.requires_citations = False
             
             # 执行任务
             execution_result = self.executor.execute(task, empty_context)

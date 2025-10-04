@@ -166,16 +166,27 @@ class PDFParser(DocumentParser):
                 # Convert table to string representation
                 table_text = self._table_to_text(table)
                 
+                # Extract table caption from surrounding text
+                caption = self._extract_table_caption(page, table, i)
+                
+                # Combine caption with table content
+                if caption:
+                    full_content = f"Table {i+1}: {caption}\n\n{table_text}"
+                else:
+                    full_content = table_text
+                
                 # Get table bbox (approximate)
                 bbox = page.bbox  # Placeholder - could be improved
                 
                 element = ParsedElement(
                     element_type="table",
-                    content=table_text,
+                    content=full_content,
                     metadata={
                         "rows": len(table),
                         "cols": len(table[0]) if table else 0,
-                        "table_data": table
+                        "table_data": table,
+                        "caption": caption,
+                        "table_number": i + 1
                     },
                     page_num=page_num,
                     bbox=bbox,
@@ -218,13 +229,25 @@ class PDFParser(DocumentParser):
                 if self.image_config.get('save_images', False):
                     image_path = self._save_image_with_pymupdf(doc, img_info, page_num, i)
                 
+                # Extract image caption from surrounding text
+                caption = self._extract_image_caption(page, i)
+                
+                # Create content with caption
+                if caption:
+                    content = f"Figure {i+1}: {caption}"
+                else:
+                    # Generate a more descriptive placeholder when no caption is found
+                    content = f"Figure {i+1}: Image from page {page_num} (no caption available)"
+                
                 element = ParsedElement(
                     element_type="figure",
-                    content=f"[Image: {img_info[0] if img_info else 'unnamed'}]",
+                    content=content,
                     metadata={
                         "width": img_info[2] if img_info else 0,
                         "height": img_info[3] if img_info else 0,
-                        "image_path": image_path
+                        "image_path": image_path,
+                        "caption": caption,
+                        "figure_number": i + 1
                     },
                     page_num=page_num,
                     bbox=(0, 0, img_info[2] if img_info else 0, img_info[3] if img_info else 0),
@@ -292,7 +315,7 @@ class PDFParser(DocumentParser):
             # Get image configuration
             if self.output_dir:
                 # Use benchmark output directory
-                output_dir = self.output_dir / "images"
+                output_dir = self.output_dir
             else:
                 # Use default configuration
                 output_dir = Path(self.image_config.get('image_output_dir', 'data/images'))
@@ -389,7 +412,7 @@ class PDFParser(DocumentParser):
             # Get image configuration
             if self.output_dir:
                 # Use benchmark output directory
-                output_dir = self.output_dir / "images"
+                output_dir = self.output_dir
             else:
                 # Use default configuration
                 output_dir = Path(self.image_config.get('image_output_dir', 'data/images'))
@@ -528,6 +551,73 @@ class PDFParser(DocumentParser):
                     lines.append(separator)
                     
         return "\n".join(lines)
+    
+    def _extract_table_caption(self, page, table, table_index: int) -> str:
+        """Extract table caption from surrounding text"""
+        try:
+            # Get all text from the page
+            page_text = page.extract_text()
+            if not page_text:
+                return ""
+            
+            # Look for common table caption patterns
+            caption_patterns = [
+                r'Table\s+\d+[:\-]?\s*(.+?)(?=\n\n|\nTable|\nFigure|\n[A-Z]|\Z)',
+                r'Table\s+\d+\.\d+[:\-]?\s*(.+?)(?=\n\n|\nTable|\nFigure|\n[A-Z]|\Z)',
+                r'Table\s+[A-Z]\.\d+[:\-]?\s*(.+?)(?=\n\n|\nTable|\nFigure|\n[A-Z]|\Z)',
+                r'^\s*Table\s+\d+[:\-]?\s*(.+?)$',
+            ]
+            
+            for pattern in caption_patterns:
+                matches = re.findall(pattern, page_text, re.IGNORECASE | re.MULTILINE | re.DOTALL)
+                if matches:
+                    # Return the first match that seems like a caption
+                    for match in matches:
+                        caption = match.strip()
+                        if len(caption) > 10 and len(caption) < 200:  # Reasonable caption length
+                            return caption
+            
+            # If no pattern matches, look for text near the table
+            # This is a simplified approach - could be improved with better positioning
+            return ""
+            
+        except Exception as e:
+            logger.debug(f"Error extracting table caption: {e}")
+            return ""
+    
+    def _extract_image_caption(self, page, image_index: int) -> str:
+        """Extract image caption from surrounding text"""
+        try:
+            # Get all text from the page
+            page_text = page.extract_text()
+            if not page_text:
+                return ""
+            
+            # Look for common figure caption patterns
+            caption_patterns = [
+                r'Figure\s+\d+[:\-]?\s*(.+?)(?=\n\n|\nTable|\nFigure|\n[A-Z]|\Z)',
+                r'Figure\s+\d+\.\d+[:\-]?\s*(.+?)(?=\n\n|\nTable|\nFigure|\n[A-Z]|\Z)',
+                r'Figure\s+[A-Z]\.\d+[:\-]?\s*(.+?)(?=\n\n|\nTable|\nFigure|\n[A-Z]|\Z)',
+                r'Fig\.\s+\d+[:\-]?\s*(.+?)(?=\n\n|\nTable|\nFigure|\n[A-Z]|\Z)',
+                r'^\s*Figure\s+\d+[:\-]?\s*(.+?)$',
+            ]
+            
+            for pattern in caption_patterns:
+                matches = re.findall(pattern, page_text, re.IGNORECASE | re.MULTILINE | re.DOTALL)
+                if matches:
+                    # Return the first match that seems like a caption
+                    for match in matches:
+                        caption = match.strip()
+                        if len(caption) > 10 and len(caption) < 200:  # Reasonable caption length
+                            return caption
+            
+            # If no pattern matches, look for text near the image
+            # This is a simplified approach - could be improved with better positioning
+            return ""
+            
+        except Exception as e:
+            logger.debug(f"Error extracting image caption: {e}")
+            return ""
     
     def extract_text(self, file_path: Union[str, Path]) -> str:
         """Extract plain text from PDF"""
@@ -673,7 +763,7 @@ class HTMLParser(DocumentParser):
         return elements
     
     def _extract_tables(self, soup: BeautifulSoup) -> List[ParsedElement]:
-        """Extract table elements"""
+        """Extract table elements with captions"""
         elements = []
         
         for i, table in enumerate(soup.find_all('table')):
@@ -684,8 +774,17 @@ class HTMLParser(DocumentParser):
                     rows.append(cells)
                     
             if rows:
+                # Extract table caption
+                caption = self._extract_html_table_caption(table)
+                
                 # Convert to markdown-style table
-                content = self._table_to_text(rows)
+                table_content = self._table_to_text(rows)
+                
+                # Combine caption with table content
+                if caption:
+                    content = f"Table {i+1}: {caption}\n\n{table_content}"
+                else:
+                    content = table_content
                 
                 element = ParsedElement(
                     element_type="table",
@@ -695,13 +794,47 @@ class HTMLParser(DocumentParser):
                         "rows": len(rows),
                         "cols": len(rows[0]) if rows else 0,
                         "class": table.get('class', []),
-                        "table_data": rows
+                        "table_data": rows,
+                        "caption": caption,
+                        "table_number": i + 1
                     },
                     element_id=f"table_{i}"
                 )
                 elements.append(element)
                 
         return elements
+    
+    def _extract_html_table_caption(self, table) -> str:
+        """Extract table caption from HTML table element"""
+        try:
+            # Look for <caption> tag
+            caption_tag = table.find('caption')
+            if caption_tag:
+                return caption_tag.get_text().strip()
+            
+            # Look for preceding elements that might be captions
+            # Check previous sibling elements
+            prev_element = table.find_previous_sibling()
+            if prev_element:
+                text = prev_element.get_text().strip()
+                # Check if it looks like a caption
+                if (text and len(text) < 200 and 
+                    any(keyword in text.lower() for keyword in ['table', 'data', 'results', 'summary'])):
+                    return text
+            
+            # Look for following elements (some captions come after)
+            next_element = table.find_next_sibling()
+            if next_element:
+                text = next_element.get_text().strip()
+                if (text and len(text) < 200 and 
+                    any(keyword in text.lower() for keyword in ['table', 'data', 'results', 'summary'])):
+                    return text
+            
+            return ""
+            
+        except Exception as e:
+            logger.debug(f"Error extracting HTML table caption: {e}")
+            return ""
     
     def _extract_links(self, soup: BeautifulSoup) -> List[ParsedElement]:
         """Extract link elements"""
@@ -740,9 +873,18 @@ class HTMLParser(DocumentParser):
             if self.image_config.get('save_images', False) and src:
                 image_path = self._save_html_image(src, i)
             
+            # Extract image caption
+            caption = self._extract_html_image_caption(img)
+            
+            # Create content with caption
+            if caption:
+                content = f"Figure {i+1}: {caption}\n[Image: {alt or src}]"
+            else:
+                content = f"[Image: {alt or src}]"
+            
             element = ParsedElement(
                 element_type="figure",
-                content=f"[Image: {alt or src}]",
+                content=content,
                 metadata={
                     "tag": "img",
                     "src": src,
@@ -750,7 +892,9 @@ class HTMLParser(DocumentParser):
                     "width": img.get('width', ''),
                     "height": img.get('height', ''),
                     "class": img.get('class', []),
-                    "image_path": image_path
+                    "image_path": image_path,
+                    "caption": caption,
+                    "figure_number": i + 1
                 },
                 element_id=f"image_{i}"
             )
@@ -758,13 +902,59 @@ class HTMLParser(DocumentParser):
             
         return elements
     
+    def _extract_html_image_caption(self, img) -> str:
+        """Extract image caption from HTML img element"""
+        try:
+            # First check if alt text is descriptive enough to be a caption
+            alt_text = img.get('alt', '').strip()
+            if alt_text and len(alt_text) > 10 and len(alt_text) < 200:
+                return alt_text
+            
+            # Look for title attribute
+            title = img.get('title', '').strip()
+            if title and len(title) > 10 and len(title) < 200:
+                return title
+            
+            # Look for preceding elements that might be captions
+            prev_element = img.find_previous_sibling()
+            if prev_element:
+                text = prev_element.get_text().strip()
+                if (text and len(text) < 200 and 
+                    any(keyword in text.lower() for keyword in ['figure', 'image', 'photo', 'chart', 'graph'])):
+                    return text
+            
+            # Look for following elements (some captions come after)
+            next_element = img.find_next_sibling()
+            if next_element:
+                text = next_element.get_text().strip()
+                if (text and len(text) < 200 and 
+                    any(keyword in text.lower() for keyword in ['figure', 'image', 'photo', 'chart', 'graph'])):
+                    return text
+            
+            # Look for parent element that might contain caption
+            parent = img.parent
+            if parent:
+                # Check if parent has a caption-like class or id
+                parent_class = ' '.join(parent.get('class', []))
+                parent_id = parent.get('id', '')
+                if any(keyword in (parent_class + ' ' + parent_id).lower() for keyword in ['caption', 'figure', 'image']):
+                    text = parent.get_text().strip()
+                    if text and len(text) < 200:
+                        return text
+            
+            return ""
+            
+        except Exception as e:
+            logger.debug(f"Error extracting HTML image caption: {e}")
+            return ""
+    
     def _save_html_image(self, src: str, image_index: int) -> Optional[str]:
         """Save HTML image to file and return the path"""
         try:
             # Get image configuration
             if self.output_dir:
                 # Use benchmark output directory
-                output_dir = self.output_dir / "images"
+                output_dir = self.output_dir
             else:
                 # Use default configuration
                 output_dir = Path(self.image_config.get('image_output_dir', 'data/images'))
@@ -874,14 +1064,26 @@ class DOCXParser(DocumentParser):
                     rows.append(cells)
                     
             if rows:
-                content = self._table_to_text(rows)
+                # Extract table caption (simplified for DOCX)
+                caption = self._extract_docx_table_caption(table, i)
+                
+                table_content = self._table_to_text(rows)
+                
+                # Combine caption with table content
+                if caption:
+                    content = f"Table {i+1}: {caption}\n\n{table_content}"
+                else:
+                    content = table_content
+                
                 element = ParsedElement(
                     element_type="table",
                     content=content,
                     metadata={
                         "rows": len(rows),
                         "cols": len(rows[0]) if rows else 0,
-                        "table_data": rows
+                        "table_data": rows,
+                        "caption": caption,
+                        "table_number": i + 1
                     },
                     element_id=f"table_{i}"
                 )
@@ -909,6 +1111,29 @@ class DOCXParser(DocumentParser):
             except (ValueError, IndexError):
                 return 1
         return 0
+    
+    def _extract_docx_table_caption(self, table, table_index: int) -> str:
+        """Extract table caption from DOCX table (simplified)"""
+        try:
+            # For DOCX, we can look at the table's title property if available
+            # This is a simplified implementation - DOCX caption extraction is complex
+            if hasattr(table, 'title') and table.title:
+                return table.title.strip()
+            
+            # Look for table caption in the table's first row if it looks like a caption
+            if table.rows:
+                first_row = table.rows[0]
+                if len(first_row.cells) == 1:  # Single cell might be a caption
+                    cell_text = first_row.cells[0].text.strip()
+                    if (cell_text and len(cell_text) < 200 and 
+                        any(keyword in cell_text.lower() for keyword in ['table', 'data', 'results', 'summary'])):
+                        return cell_text
+            
+            return ""
+            
+        except Exception as e:
+            logger.debug(f"Error extracting DOCX table caption: {e}")
+            return ""
     
     def _table_to_text(self, rows: List[List[str]]) -> str:
         """Convert table rows to text representation"""

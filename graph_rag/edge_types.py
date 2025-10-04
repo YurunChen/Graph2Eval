@@ -7,10 +7,12 @@ from dataclasses import dataclass, field
 from typing import Dict, List, Any, Optional, Union
 from enum import Enum
 import json
+from loguru import logger
 
 
 class EdgeType(Enum):
     """Types of edges in the graph"""
+    # Document-focused edge types
     SEQUENCE = "sequence"  # next/prev sequential relationship
     CONTAINS = "contains"  # hierarchical containment
     REFERS_TO = "refers_to"  # explicit reference
@@ -20,6 +22,7 @@ class EdgeType(Enum):
     CROSS_DOC = "cross_doc"  # cross-document relationships
     TABLE_CONTEXT = "table_context"  # table-paragraph relationships
     FIGURE_CONTEXT = "figure_context"  # figure-text relationships
+    
     # Web-specific edge types
     WEB_NAVIGATION = "web_navigation"  # page navigation
     WEB_INTERACTION = "web_interaction"  # user interaction
@@ -27,6 +30,16 @@ class EdgeType(Enum):
     WEB_CLICK_TRIGGER = "web_click_trigger"  # click triggers action
     WEB_DATA_FLOW = "web_data_flow"  # data flow between elements
     WEB_LAYOUT = "web_layout"  # spatial layout relationships
+    
+    # Task-specific edge types
+    NAV_TO = "NavTo"  # 页面跳转
+    FILLS = "Fills"  # 输入→表单字段
+    CONTROLS = "Controls"  # 按钮→表单/提交
+    OPENS = "Opens"  # 打开详情/弹窗
+    FILTERS = "Filters"  # 过滤关系
+    SAME_ENTITY = "SameEntity"  # 同一实体不同视图
+    TRIGGERS = "Triggers"  # 点击触发其他元素
+    DATA_FLOW = "DataFlow"  # 数据流关系
 
 
 @dataclass
@@ -156,7 +169,7 @@ class ReferenceEdge(Edge):
 class SemanticEdge(Edge):
     """Edge representing semantic similarity"""
     similarity_score: float = 0.0
-    similarity_method: str = "cosine"  # cosine, jaccard, bert_score, etc.
+    similarity_method: str = "cosine"  # cosine, jaccard, semantic, etc.
     threshold_used: float = 0.7
     
     def __post_init__(self):
@@ -357,10 +370,18 @@ def edge_from_dict(data: Dict[str, Any]) -> Edge:
     }
     
     edge_class = edge_classes.get(edge_type)
-    if not edge_class:
-        raise ValueError(f"Unknown edge type: {edge_type}")
-    
-    return edge_class.from_dict(data)
+    if edge_class:
+        return edge_class.from_dict(data)
+    else:
+        # For unsupported edge types, create a basic Edge
+        return Edge(
+            edge_id=data["edge_id"],
+            edge_type=edge_type,
+            source_node_id=data.get("source_node_id", data.get("source_node", "")),
+            target_node_id=data.get("target_node_id", data.get("target_node", "")),
+            weight=data.get("weight", 1.0),
+            metadata=data.get("metadata", {})
+        )
 
 
 # Graph motif patterns for task generation
@@ -630,3 +651,29 @@ def create_web_edge(edge_type: EdgeType, **kwargs) -> Edge:
         raise ValueError(f"Unknown web edge type: {edge_type}")
     
     return edge_classes[edge_type](**kwargs)
+
+
+class GraphEdge:
+    """图边 - 代表节点间的交互关系"""
+    
+    def __init__(self, edge_id: str, source_node_id: str, target_node_id: str, 
+                 edge_type: EdgeType, weight: float = 1.0, metadata: Optional[Dict[str, Any]] = None):
+        self.edge_id = edge_id
+        self.source_node_id = source_node_id
+        self.target_node_id = target_node_id
+        self.edge_type = edge_type
+        self.weight = weight
+        self.metadata = metadata or {}
+    
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "edge_id": self.edge_id,
+            "source_node": self.source_node_id,
+            "target_node": self.target_node_id,
+            "edge_type": self.edge_type.value,
+            "weight": self.weight,
+            "metadata": self.metadata
+        }
+
+
+ 

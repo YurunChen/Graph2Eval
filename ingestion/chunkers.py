@@ -93,10 +93,10 @@ class SemanticChunker(DocumentChunker):
         
         chunks = []
         
-        # Group elements by type
+        # Group elements by type (include tables and figures with captions)
         text_elements = [
             elem for elem in document.elements 
-            if elem.element_type in ["paragraph", "heading", "list_item"]
+            if elem.element_type in ["paragraph", "heading", "list_item", "table", "figure"]
         ]
         
         if not text_elements:
@@ -517,7 +517,7 @@ class FixedSizeChunker(DocumentChunker):
         element_ids = []
         
         for element in document.elements:
-            if element.element_type in ["paragraph", "heading", "list_item"]:
+            if element.element_type in ["paragraph", "heading", "list_item", "table", "figure"]:
                 text_parts.append(element.content)
                 element_ids.append(element.element_id)
         

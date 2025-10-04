@@ -3,8 +3,8 @@
 
   # Task generation settings
 generation:
-  max_total_tasks: 5  # Reduced for faster generation
-  require_gold_answer: false
+  max_total_tasks: 500  # Significantly increased for comprehensive task coverage
+  require_gold_answer: true
   require_citations: true
   require_reasoning: false
   min_content_length: 50
@@ -21,8 +21,8 @@ generation:
   # LLM-based generation
   use_llm_generation: true  # Enable LLM generation for all task types
   llm_model_name: "gpt-4o-mini"
-  llm_temperature: 0.7
-  llm_max_tokens: 1500  # Increased for multi-hop tasks
+  llm_temperature: 0.1  # Increased for more creative task generation
+  llm_max_tokens: 4000  # Further increased for complex multi-hop tasks
   
   # LLM-based quality control
   use_llm_quality_check: true  # 启用LLM质量检查
@@ -33,25 +33,22 @@ generation:
   # Multi-hop task generation
   enable_multi_hop_generation: true
   multi_hop_min_hops: 2
-  multi_hop_max_hops: 5
+  multi_hop_max_hops: 7  # Increased for more complex reasoning
   multi_hop_min_nodes_per_hop: 1
-  multi_hop_max_nodes_per_hop: 3
+  multi_hop_max_nodes_per_hop: 4  # Increased for richer context
   
   # Randomization
   random_seed: null  # Will use global seed if null
   shuffle_tasks: true
 
-# Subgraph sampling configuration
+# Subgraph sampling configuration (for document graphs)
 subgraph_sampling:
-  max_samples_per_template: 5
-  max_subgraph_size: 8
+  max_samples_per_template: 10  # Increased for more diverse subgraphs
+  max_subgraph_size: 12  # Increased for more complex tasks
   min_subgraph_size: 1
-  sampling_strategy: "random"  # random, motif_based, centrality_based, semantic_based
+  sampling_strategy: "hybrid"  # motif_based, centrality_based, semantic_based, context_chain_based, contradiction_based, hybrid
   
   # Sampling strategy specific parameters
-  random:
-    seed: null
-    
   motif_based:
     min_motif_size: 3
     max_motif_size: 6
@@ -64,6 +61,44 @@ subgraph_sampling:
   semantic_based:
     similarity_threshold: 0.7
     max_semantic_distance: 0.5
+    
+  context_chain_based:
+    chain_length: 3
+    require_logical_flow: true
+    max_chain_attempts: 10
+    
+  contradiction_based:
+    similarity_threshold_min: 0.7
+    similarity_threshold_max: 0.9
+    max_contradiction_pairs: 4
+    
+  # Hybrid strategy configuration
+  hybrid:
+    strategies: ["motif_based", "centrality_based", "semantic_based", "context_chain_based", "contradiction_based"]
+    strategy_weights: [0.25, 0.25, 0.2, 0.15, 0.15]  # Weights for each strategy
+    min_samples_per_strategy: 2  # Increased minimum samples
+    max_samples_per_strategy: 4  # Increased maximum samples
+    enable_adaptive_weights: true  # Dynamically adjust weights based on success rate
+    quality_threshold: 0.7  # Quality threshold for strategy selection
+    fallback_strategy: "centrality_based"  # Fallback when hybrid fails
+
+# Web subgraph sampling configuration (for web UI graphs)
+web_subgraph_sampling:
+  sampling_strategy: "hybrid_multi_strategy"  # element_centric, relation_centric, goal_conditioned, curriculum_radius, hybrid_multi_strategy
+  max_radius: 5  # Maximum hop distance
+  min_nodes: 3   # Minimum number of nodes per subgraph
+  max_nodes: 15   # Maximum number of nodes per subgraph
+  max_subgraphs_per_seed: 15  # Maximum number of subgraphs per task seed (ensures quality over quantity)
+  max_total_subgraphs: 200  # Maximum total number of subgraphs to sample for diversity
+  target_task_type: null  # Target task type (optional)
+  curriculum_step: 1  # Current step for curriculum learning
+  
+  # 并发配置
+  concurrency:
+    enable: true                    # 是否启用并发
+    max_workers: 6                 # 增加工作线程数，提高并发效果
+    chunk_size: 1                  # 每个chunk一个种子，最大化并发
+    use_thread_pool: true          # 使用线程池避免序列化问题
 
 # Multi-hop generation configuration
 multi_hop_generation:
@@ -136,51 +171,129 @@ template_filtering:
     max_tasks_per_template: 5
     require_multiple_sources: true
 
-# Output configuration
-output:
-  save_tasks: true
-  output_format: "json"  # json, csv, yaml
-  include_quality_scores: true
-  include_variables: true
-  include_subgraph_info: true
-  
-  # File naming
-  filename_prefix: "generated_tasks"
-  include_timestamp: true
-  include_template_info: true
+
 
 # Web Task Generation Configuration
 web_task_generation:
-  max_tasks_per_page: 5  # Reduced for faster generation
-  task_types:
-    - "form_filling"
-    - "search"
-    - "navigation"
-    - "data_extraction"
-    - "e_commerce"
-    - "content_browsing"
+  max_tasks_per_page: 50  # Increased for more tasks
+  max_tasks_per_subgraph: 20  # Increased for more diversity
   
-  # Task type specific settings
-  form_filling:
-    max_tasks: 5
-    require_form_elements: true
+  # Available task types (LLM will choose based on website type)
+  available_task_types:
+    # Business Data Tasks (only navigation and search)
+    - "business_search_filter"
+    - "business_navigation"
     
-  search:
-    max_tasks: 5
-    require_search_elements: true
+    # Navigation Tasks (use frequently)
+    - "user_navigation"
+    - "product_navigation"
+    - "order_navigation"
+    - "mixed_data_navigation"
+    - "basic_navigation"
+    - "breadcrumb_navigation"
+    - "pagination_browsing"
     
-  navigation:
-    max_tasks: 5
-    require_navigation_elements: true
+    # Interaction Tasks (PRIORITIZE these)
+    - "button_interaction"
+    - "menu_exploration"
+    - "tab_switching"
+    - "modal_interaction"
+    - "toast_notification"
+    - "expand_collapse"
+    - "drag_drop"
+    - "copy_paste"
+    - "context_menu"
+    - "keyboard_shortcut"
     
-  data_extraction:
-    max_tasks: 5
-    require_content_elements: true
+    # Content Tasks (use often)
+    - "content_browsing"
+    - "scroll_reading"
+    - "zoom_interaction"
     
-  e_commerce:
-    max_tasks: 5
-    require_product_elements: true
-    
-  content_browsing:
-    max_tasks: 5
-    require_content_elements: true
+    # Advanced Tasks (use when appropriate)
+    - "compare_two_items"
+    - "multi_hop_navigation"
+    - "cross_view_aggregation"
+    - "sorting_operation"
+    - "filter_application"
+    - "e_commerce_purchase"
+    - "product_browsing"
+    - "shopping_cart"
+  
+  # Task type requirements (used for validation)
+  task_type_requirements:
+    form_filling:
+      require_form_elements: true
+    search_filter:
+      require_search_elements: true
+    information_aggregation:
+      require_multiple_sources: true
+    navigation_task:
+      require_navigation_elements: true
+    data_extraction:
+      require_content_elements: true
+    e_commerce_purchase:
+      require_product_elements: true
+    content_browsing:
+      require_content_elements: true
+    button_interaction:
+      require_button_elements: true
+    menu_exploration:
+      require_menu_elements: true
+    tab_switching:
+      require_tab_elements: true
+    modal_interaction:
+      require_modal_elements: true
+    toast_notification:
+      require_notification_elements: true
+    breadcrumb_navigation:
+      require_breadcrumb_elements: true
+    pagination_browsing:
+      require_pagination_elements: true
+    expand_collapse:
+      require_expandable_elements: true
+    scroll_reading:
+      require_scrollable_elements: true
+
+
+# Similarity Detection Configuration
+similarity_detection:
+  # General similarity detection settings
+  enabled: true
+  max_workers: 4
+  batch_size: 50
+  cache_results: true
+  enable_early_stop: true
+  
+  # Similarity thresholds for different task types
+  similarity_thresholds:
+    default: 0.65  # Default threshold for all task types (adjusted for Web tasks)
+    text_tasks: 0.75  # For document-based text tasks (increased)
+    web_tasks: 0.65  # For web UI tasks (adjusted for text-based similarity)
+    navigation_tasks: 0.7  # For navigation tasks (adjusted)
+    form_filling_tasks: 0.65  # For form filling tasks (adjusted)
+    data_extraction_tasks: 0.6  # For data extraction tasks (adjusted)
+    information_aggregation_tasks: 0.65  # For information aggregation tasks (adjusted)
+  
+  # Algorithm configuration
+  algorithms:
+    - "hybrid"  # Primary algorithm: hybrid (cosine + jaccard + content + semantic)
+    # - "cosine_similarity"  # Alternative: cosine similarity only
+    # - "jaccard_similarity"  # Alternative: jaccard similarity only
+    # - "content_overlap"  # Alternative: content overlap only
+    # - "semantic_similarity"  # Alternative: semantic similarity only
+  
+  # Performance settings
+  performance:
+    enable_concurrent_processing: true
+    max_concurrent_batches: 4
+    batch_timeout_seconds: 30
+    memory_limit_mb: 512
+  
+  # Quality control
+  quality_control:
+    min_similarity_for_removal: 0.5  # Minimum similarity to consider removal (increased)
+    max_similarity_for_retention: 0.8  # Maximum similarity to retain both tasks (decreased for stricter filtering)
+    enable_quality_based_selection: true  # Use quality scores in duplicate removal
+    quality_weight: 0.4  # Weight for quality score in selection (increased)
+    diversity_weight: 0.6  # Weight for diversity score in selection (adjusted)

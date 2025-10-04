@@ -350,23 +350,49 @@ class JSONStorage(GraphStorage):
         try:
             with open(path, 'r', encoding='utf-8') as f:
                 graph_data = json.load(f)
-            
+
             # Clear existing data
             self.clear()
-            
-            # Load nodes
-            for node_data in graph_data.get("nodes", []):
-                node = node_from_dict(node_data)
-                self.add_node(node)
-            
-            # Load edges
-            for edge_data in graph_data.get("edges", []):
-                edge = edge_from_dict(edge_data)
-                self.add_edge(edge)
-            
+
+            # Load nodes - handle both dict and list formats
+            nodes_data = graph_data.get("nodes", [])
+            if isinstance(nodes_data, dict):
+                # Handle dictionary format (legacy)
+                for node_data in nodes_data.values():
+                    node = node_from_dict(node_data)
+                    self.add_node(node)
+            else:
+                # Handle list format
+                for node_data in nodes_data:
+                    node = node_from_dict(node_data)
+                    self.add_node(node)
+
+            # Load edges - handle both dict and list formats
+            edges_data = graph_data.get("edges", [])
+            if isinstance(edges_data, dict):
+                # Handle dictionary format (legacy)
+                for edge_data in edges_data.values():
+                    # Convert old field names to new ones
+                    if "source_node" in edge_data and "source_node_id" not in edge_data:
+                        edge_data["source_node_id"] = edge_data.pop("source_node")
+                    if "target_node" in edge_data and "target_node_id" not in edge_data:
+                        edge_data["target_node_id"] = edge_data.pop("target_node")
+                    edge = edge_from_dict(edge_data)
+                    self.add_edge(edge)
+            else:
+                # Handle list format
+                for edge_data in edges_data:
+                    # Convert old field names to new ones
+                    if "source_node" in edge_data and "source_node_id" not in edge_data:
+                        edge_data["source_node_id"] = edge_data.pop("source_node")
+                    if "target_node" in edge_data and "target_node_id" not in edge_data:
+                        edge_data["target_node_id"] = edge_data.pop("target_node")
+                    edge = edge_from_dict(edge_data)
+                    self.add_edge(edge)
+
             logger.info(f"Loaded graph from {path}")
             logger.info(f"Nodes: {len(self.nodes)}, Edges: {len(self.edges)}")
-            
+
         except Exception as e:
             logger.error(f"Failed to load graph: {e}")
             raise
