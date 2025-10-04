@@ -576,53 +576,6 @@ output/
     └── safety_tasks.jsonl
 ```
 
-## 🔍 Advanced Features
-
-### Command Line Options
-
-```bash
-# Custom run name
-python benchmark_runner.py --mode evaluate \
-    --file output/generate/run_*/datasets/tasks.jsonl \
-    --run-name "experiment_v1"
-
-# Dataset type filtering
-python benchmark_runner.py --mode evaluate \
-    --datasets-folder output/generate/run_*/datasets/ \
-    --dataset-type normal  # Only normal tasks
-
-# Resume interrupted evaluation
-python benchmark_runner.py --mode evaluate \
-    --resume output/evaluate/run_20241201_120000/
-
-# Debug mode with verbose logging
-python benchmark_runner.py --mode evaluate \
-    --file output/generate/run_*/datasets/tasks.jsonl \
-    --debug
-```
-
-### Multi-Modal Support
-
-- **Document Processing**: PDF, text, and web content ingestion
-- **Image Analysis**: Screenshot and document image processing
-- **Web Interaction**: Automated web browsing and form filling
-- **Graph Construction**: Knowledge graph building from multiple sources
-
-### Task Generation Features
-
-- **Multi-hop Reasoning**: Complex tasks requiring multiple reasoning steps
-- **Quality Control**: LLM-based task quality assessment
-- **Coverage Optimization**: Intelligent task selection for comprehensive evaluation
-
-### Configuration Flexibility
-
-The system supports flexible configuration through YAML files:
-
-- **Agent Models**: Configure different models for different agents
-- **Task Generation**: Control task complexity and diversity
-- **Graph Construction**: Customize knowledge graph building parameters
-- **Evaluation Metrics**: Define custom evaluation criteria
-
 ## 🤝 Contact
 
 For questions, issues, or contributions:
