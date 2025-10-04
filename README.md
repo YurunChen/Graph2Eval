@@ -4,7 +4,11 @@
 
 # Graph2Eval: Automatic Multimodal Task Generation for Agents via Knowledge Graphs
 
-📄 [arXiv](https://arxiv.org/abs/2510.00507) | 🐦 [X](https://x.com/YRChen_AIsafety/status/1974361550279549192) 
+<div align="center">
+
+📄 [arXiv](https://arxiv.org/abs/2510.00507) | 🐦 [X](https://x.com/YRChen_AIsafety/status/1974361550279549192)
+
+</div> 
 
 ## 🎯 Overview
 
