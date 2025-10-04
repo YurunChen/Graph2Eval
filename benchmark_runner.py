@@ -141,9 +141,7 @@ class BenchmarkRunner:
         elif self.mode == "evaluate":
             directories = {
                 "base": timestamped_dir,
-                "results": timestamped_dir / "results",
-                "evaluation": timestamped_dir / "evaluation",
-                "file_images": timestamped_dir / "file_images"
+                "results": timestamped_dir / "results"
             }
         else:
             # Fallback for unknown modes
@@ -172,9 +170,7 @@ class BenchmarkRunner:
         # Create directory structure based on existing directory
         directories = {
             "base": existing_path,
-            "results": existing_path / "results",
-            "evaluation": existing_path / "evaluation",
-            "file_images": existing_path / "file_images"
+            "results": existing_path / "results"
         }
         
         # Ensure all directories exist
@@ -449,9 +445,6 @@ class BenchmarkRunner:
             if self.mode == "collect" and "documents" in self.output_dirs:
                 # For collect mode, save images to documents/images subdirectory
                 images_output_dir = self.output_dirs["documents"] / "images"
-            elif self.mode == "evaluate" and "file_images" in self.output_dirs:
-                # For evaluate mode, save images to file_images directory
-                images_output_dir = self.output_dirs["file_images"]
             else:
                 # Fallback to default data/images directory
                 images_output_dir = Path("data/images")
@@ -2511,15 +2504,11 @@ class BenchmarkRunner:
             
             # Use existing output directories
             output_dirs = self.output_dirs
-            web_agent_output_dir = output_dirs["results"] / "web_agent"
             
-            # Ensure web_agent directory exists
-            web_agent_output_dir.mkdir(parents=True, exist_ok=True)
-            
-            # Initialize Web Agent with correct output directory
+            # Initialize Web Agent with results directory as output
             web_agent = WebAgent(
                 config=self.config.agent.get('web_agent', {}),
-                output_dir=str(web_agent_output_dir)
+                output_dir=str(output_dirs["results"])
             )
             
             # Initialize browser

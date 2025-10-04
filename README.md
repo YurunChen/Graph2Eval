@@ -494,23 +494,22 @@ The system creates organized output directories for each mode:
 
 ### Collect Mode Output
 ```
-output/collect/run_collect_1757165919/
+output/collect/run_collect_*/
 ├── documents/                          # Processed document images
-│   ├── page_1.png
-│   ├── page_2.png
-│   └── ...
+│   └── images/
+│       ├── page_1_image_0.png
+│       ├── page_1_image_1.png
+│       ├── page_12_image_0.png
+│       └── ...
 ├── results/                            # Collection results
-│   └── collection_results.json
-├── web_info/                           # Web collection data
-│   ├── page_info.json
-│   └── screenshots/
-└── datasets/                           # Extracted datasets
-    └── documents.jsonl
+│   └── document_collection_results.json
+└── web_info/                           # Web collection data (if applicable)
+    └── (web-related files)
 ```
 
 ### Graph Mode Output
 ```
-output/graph/run_graph_1757165919/
+output/graph/run_graph_*
 ├── graph/
 │   └── knowledge_graph.json           # Built knowledge graph
 ├── vectors/                            # Vector embeddings
@@ -523,28 +522,38 @@ output/graph/run_graph_1757165919/
 
 ### Generate Mode Output
 ```
-output/generate/run_gen_1757165919/
+output/generate/run_gen_*/
 ├── datasets/                           # Generated task datasets
-│   ├── all_tasks.jsonl
-│   ├── normal_tasks.jsonl
-│   └── safety_tasks.jsonl
+│   └── web_tasks.jsonl
+├── graph/                              # Knowledge graph data
+│   └── knowledge_graph.json
 ├── subgraphs/                          # Subgraph samples
-│   ├── basic_extraction_subgraphs.json
-│   └── table_qa_subgraphs.json
+│   ├── web_element_centric_unknown_subgraphs.json
+│   └── web_subgraphs_summary.json
+├── vectors/                            # Vector embeddings
+│   ├── vectors_faiss.faiss
+│   ├── vectors_faiss.metadata
+│   └── vectors_nodes.pkl
 └── results/
-    └── generation_results.json
+    └── task_generation_results.json
 ```
 
 ### Evaluate Mode Output
 ```
-output/evaluate/test_text_single_agent_rag/
-├── results/
-│   └── individual_results/             # Individual task results
-│       ├── task_22f7cb5c_20251002_134635.json
-│       ├── task_3bb12f3f_20251002_140156.json
-│       └── ...
-├── evaluation/                         # Evaluation metrics
-└── file_images/                        # Task-related images
+output/evaluate/run_eval_*/
+└── results/
+    ├── individual_results/             # Individual task results
+    │   ├── task_*.json                 # Individual task result files
+    │   └── ...
+    ├── batch_evaluation/               # Batch evaluation results
+    │   ├── batch_evaluation_results_*.json
+    │   ├── batch_evaluation_summary_*.json
+    │   ├── detailed_task_metrics_*.csv
+    │   ├── overall_metrics_*.csv
+    │   └── task_type_metrics_*.csv
+    ├── evaluation_results.json         # Main evaluation results
+    ├── full_res.csv                    # Full results CSV
+    └── summary.csv                     # Summary results
 ```
 
 ### Data Flow Structure

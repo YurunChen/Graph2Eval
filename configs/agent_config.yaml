@@ -1,25 +1,3 @@
-# Agent Configuration - Unified Architecture
-# 
-# agent_mode: Controls the overall agent system mode
-#   - "single": Use a single agent (no_rag or rag)
-#   - "multi_agent": Use multi-agent system
-#
-# agent_type: Controls whether retrieval is enabled
-#   - "no_rag": No retrieval capabilities (for both single and multi-agent modes)
-#   - "rag": RAG capabilities with knowledge graph retrieval
-#
-# When agent_mode is "multi":
-#   - If agent_type is "no_rag": Multi-agent system without retrieval (retriever agent disabled)
-#   - If agent_type is "rag": Multi-agent system with retrieval (retriever agent enabled)
-#
-# Common settings are shared across all agent types:
-#   - execution: LLM execution parameters
-#   - retrieval: Knowledge graph retrieval parameters  
-#   - system: Common system settings
-#   - multi_step: Multi-step execution settings
-#
-# Multi-agent specific settings are under multi_agent section
-
 # Agent configuration options
 agent_mode: single     # Available modes: [single, multi, web]
 agent_type: no_rag  # Type options: [no_rag, rag, agent_s, som_agent] 
