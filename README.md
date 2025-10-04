@@ -191,13 +191,26 @@ The benchmark system supports four main modes: `collect`, `graph`, `generate`, a
 python benchmark_runner.py --mode collect \
     --documents documents/sample.pdf documents/another.pdf
 
+# Or using short form
+python benchmark_runner.py -m collect \
+    -d documents/sample.pdf documents/another.pdf
+
 # Collect data from web URLs
 python benchmark_runner.py --mode collect \
     --urls https://example.com https://httpbin.org/html
 
+# Or using short form
+python benchmark_runner.py -m collect \
+    -u https://example.com https://httpbin.org/html
+
 # Custom output folder name using -n parameter
 python benchmark_runner.py --mode collect \
     --documents documents/sample.pdf \
+    --run-name my_custom_collection
+
+# Or using short form
+python benchmark_runner.py -m collect \
+    -d documents/sample.pdf \
     -n my_custom_collection
 ```
 
@@ -209,10 +222,21 @@ python benchmark_runner.py --mode graph \
     --collection output/collect/run_*/collections/ \
     --output-dir output/graph/run_*/
 
+# Or using short form
+python benchmark_runner.py -m graph \
+    -c output/collect/run_*/collections/ \
+    -o output/graph/run_*/
+
 # Custom output folder name using -n parameter
 python benchmark_runner.py --mode graph \
     --collection output/collect/run_*/collections/ \
     --output-dir output/graph/run_*/ \
+    --run-name my_custom_graph
+
+# Or using short form
+python benchmark_runner.py -m graph \
+    -c output/collect/run_*/collections/ \
+    -o output/graph/run_*/ \
     -n my_custom_graph
 ```
 
@@ -224,10 +248,21 @@ python benchmark_runner.py --mode generate \
     --graph output/graph/run_*/graph/ \
     --output-dir output/generate/run_*/datasets/
 
+# Or using short form
+python benchmark_runner.py -m generate \
+    -g output/graph/run_*/graph/ \
+    -o output/generate/run_*/datasets/
+
 # Custom output folder name using -n parameter
 python benchmark_runner.py --mode generate \
     --graph output/graph/run_*/graph/ \
     --output-dir output/generate/run_*/datasets/ \
+    --run-name my_custom_tasks
+
+# Or using short form
+python benchmark_runner.py -m generate \
+    -g output/graph/run_*/graph/ \
+    -o output/generate/run_*/datasets/ \
     -n my_custom_tasks
 ```
 
@@ -238,23 +273,46 @@ python benchmark_runner.py --mode generate \
 python benchmark_runner.py --mode evaluate \
     --file output/generate/run_*/datasets/tasks.jsonl
 
+# Or using short form
+python benchmark_runner.py -m evaluate \
+    -f output/generate/run_*/datasets/tasks.jsonl
+
 # Batch evaluate on multiple datasets
 python benchmark_runner.py --mode evaluate \
     --datasets-folder output/generate/run_*/datasets/ \
     --dataset-type all  # normal or all
 
+# Or using short form
+python benchmark_runner.py -m evaluate \
+    -df output/generate/run_*/datasets/ \
+    -t all
+
 # Resume evaluation from existing results
 python benchmark_runner.py --mode evaluate \
     --resume output/evaluate/run_20241201_120000/
+
+# Or using short form
+python benchmark_runner.py -m evaluate \
+    -r output/evaluate/run_20241201_120000/
 
 # Only evaluate existing results (skip execution)
 python benchmark_runner.py --mode evaluate \
     --file output/generate/run_*/datasets/tasks.jsonl \
     --evaluate-only
 
+# Or using short form
+python benchmark_runner.py -m evaluate \
+    -f output/generate/run_*/datasets/tasks.jsonl \
+    -eo
+
 # Custom output folder name using -n parameter
 python benchmark_runner.py --mode evaluate \
     --file output/generate/run_*/datasets/tasks.jsonl \
+    --run-name my_custom_evaluation
+
+# Or using short form
+python benchmark_runner.py -m evaluate \
+    -f output/generate/run_*/datasets/tasks.jsonl \
     -n my_custom_evaluation
 ```
 
@@ -262,23 +320,22 @@ python benchmark_runner.py --mode evaluate \
 
 ```bash
 # Step 1: Collect data from documents
-python benchmark_runner.py --mode collect \
-    --documents documents/sample.pdf
+python benchmark_runner.py -m collect -d documents/sample.pdf
 
 # Step 2: Build knowledge graph
-python benchmark_runner.py --mode graph \
-    --collection output/collect/run_*/collections/ \
-    --output-dir output/graph/run_*/
+python benchmark_runner.py -m graph \
+    -c output/collect/run_*/collections/ \
+    -o output/graph/run_*/
 
 # Step 3: Generate tasks
-python benchmark_runner.py --mode generate \
-    --graph output/graph/run_*/graph/ \
-    --output-dir output/generate/run_*/datasets/
+python benchmark_runner.py -m generate \
+    -g output/graph/run_*/graph/ \
+    -o output/generate/run_*/datasets/
 
 # Step 4: Evaluate agents
-python benchmark_runner.py --mode evaluate \
-    --datasets-folder output/generate/run_*/datasets/ \
-    --dataset-type all
+python benchmark_runner.py -m evaluate \
+    -df output/generate/run_*/datasets/ \
+    -t all
 ```
 
 ## 📁 Project Structure
@@ -401,51 +458,48 @@ storage:
 #### Single Document Processing
 ```bash
 # Process a single PDF document
-python benchmark_runner.py --mode collect --documents documents/research_paper.pdf
-python benchmark_runner.py --mode graph --collection output/collect/run_*/collections/
-python benchmark_runner.py --mode generate --graph output/graph/run_*/graph/
-python benchmark_runner.py --mode evaluate --file output/generate/run_*/datasets/tasks.jsonl
+python benchmark_runner.py -m collect -d documents/research_paper.pdf
+python benchmark_runner.py -m graph -c output/collect/run_*/collections/
+python benchmark_runner.py -m generate -g output/graph/run_*/graph/
+python benchmark_runner.py -m evaluate -f output/generate/run_*/datasets/tasks.jsonl
 ```
 
 #### Batch Processing Multiple Documents
 ```bash
 # Process multiple documents
-python benchmark_runner.py --mode collect \
-    --documents documents/*.pdf documents/*.txt
+python benchmark_runner.py -m collect -d documents/*.pdf documents/*.txt
 
 # Batch evaluate multiple datasets
-python benchmark_runner.py --mode evaluate \
-    --datasets-folder output/generate/run_*/datasets/ \
-    --dataset-type all
+python benchmark_runner.py -m evaluate \
+    -df output/generate/run_*/datasets/ \
+    -t all
 ```
 
 #### Web-based Task Generation
 ```bash
 # Collect data from web URLs
-python benchmark_runner.py --mode collect \
-    --urls https://example.com https://httpbin.org/html
+python benchmark_runner.py -m collect -u https://example.com https://httpbin.org/html
 
 # Continue with normal workflow
-python benchmark_runner.py --mode graph --collection output/collect/run_*/collections/
-python benchmark_runner.py --mode generate --graph output/graph/run_*/graph/
-python benchmark_runner.py --mode evaluate --datasets-folder output/generate/run_*/datasets/
+python benchmark_runner.py -m graph -c output/collect/run_*/collections/
+python benchmark_runner.py -m generate -g output/graph/run_*/graph/
+python benchmark_runner.py -m evaluate -df output/generate/run_*/datasets/
 ```
 
 #### Resume and Debug Options
 ```bash
 # Resume interrupted evaluation
-python benchmark_runner.py --mode evaluate \
-    --resume output/evaluate/run_20241201_120000/
+python benchmark_runner.py -m evaluate -r output/evaluate/run_20241201_120000/
 
 # Debug mode with verbose logging
-python benchmark_runner.py --mode evaluate \
-    --file output/generate/run_*/datasets/tasks.jsonl \
+python benchmark_runner.py -m evaluate \
+    -f output/generate/run_*/datasets/tasks.jsonl \
     --debug
 
 # Only evaluate existing results (skip execution)
-python benchmark_runner.py --mode evaluate \
-    --file output/generate/run_*/datasets/tasks.jsonl \
-    --evaluate-only
+python benchmark_runner.py -m evaluate \
+    -f output/generate/run_*/datasets/tasks.jsonl \
+    -eo
 ```
 
 ### Configuration Examples
