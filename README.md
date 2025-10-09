@@ -11,7 +11,7 @@
 
 *A knowledge graph-based framework for automatic task generation and evaluation*
 
-📄 [arXiv](https://arxiv.org/abs/2510.00507) | 🤗 [Dataset](https://huggingface.co/datasets/yurun-chen/Graph2Eval-Bench) | 🐦 [X (Twitter)](https://x.com/YRChen_AIsafety/status/1974361550279549192)
+📄 [arXiv](https://arxiv.org/abs/2510.00507) | 🤗 [HuggingFace](https://huggingface.co/papers/2510.00507) | 📊 [Dataset](https://huggingface.co/datasets/yurun-chen/Graph2Eval-Bench) | 🐦 [X](https://x.com/YRChen_AIsafety/status/1974361550279549192)
 
 </div> 
 
