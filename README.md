@@ -105,10 +105,10 @@ chmod +x setup_environment.sh
 ./setup_environment.sh 
 
 ```
-This creates a conda environment named `graphrag-bench`. Activate it:
+This creates a conda environment named `graph2eval`. Activate it:
 
 ```bash
-conda activate graphrag-bench
+conda activate graph2eval
 ```
 
 ### 2. Configuration Setup
