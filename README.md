@@ -5,13 +5,12 @@
 
 ### Automatic Multimodal Task Generation for Agents via Knowledge Graphs
 
-[![Python](https://img.shields.io/badge/Python-3.10+-blue.svg?style=for-the-badge&logo=python&logoColor=white)](https://www.python.org/downloads/release/python-3120/)
-[![GitHub](https://img.shields.io/badge/GitHub-Repository-black.svg?style=for-the-badge&logo=github&logoColor=white)](https://github.com/YurunChen/Graph2Eval)
-[![License](https://img.shields.io/badge/License-MIT-yellow.svg?style=for-the-badge&logo=opensourceinitiative&logoColor=black)](LICENSE)
-
 *A knowledge graph-based framework for automatic task generation and evaluation*
 
-📄 [arXiv](https://arxiv.org/abs/2510.00507) | 🤗 [HuggingFace](https://huggingface.co/papers/2510.00507) | 📊 [Dataset](https://huggingface.co/datasets/yurun-chen/Graph2Eval-Bench) | 🐦 [X](https://x.com/YRChen_AIsafety/status/1974361550279549192)
+[![arXiv](https://img.shields.io/badge/arXiv-2510.00507-b31b1b.svg?style=for-the-badge&logo=arxiv&logoColor=white)](https://arxiv.org/abs/2510.00507)
+[![HuggingFace](https://img.shields.io/badge/🤗-HuggingFace-yellow.svg?style=for-the-badge&logoColor=white)](https://huggingface.co/papers/2510.00507)
+[![Dataset](https://img.shields.io/badge/📊-Dataset-blue.svg?style=for-the-badge&logoColor=white)](https://huggingface.co/datasets/yurun-chen/Graph2Eval-Bench)
+[![X](https://img.shields.io/badge/X-Post-black.svg?style=for-the-badge&logo=x&logoColor=white)](https://x.com/YRChen_AIsafety/status/1974361550279549192)
 
 </div> 
 
