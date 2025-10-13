@@ -43,7 +43,7 @@ A collaborative framework with five specialized agents:
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                    Multi-Agent System                        │
+│                    Multi-Agent System                       │
 ├─────────────────────────────────────────────────────────────┤
 │  Planner Agent  │  Retriever Agent  │  Reasoner Agent       │
 │  (Planning)     │  (Information)    │  (Analysis)           │
