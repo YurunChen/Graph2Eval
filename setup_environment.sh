@@ -61,8 +61,6 @@ check_command() {
 
 # Check if conda is available
 check_conda() {
-    print_step "Checking conda environment"
-    
     if check_command conda; then
         conda_version=$(conda --version)
         print_success "Conda available: $conda_version"
@@ -77,8 +75,6 @@ check_conda() {
 
 # Create conda environment
 create_conda_env() {
-    print_step "Creating conda environment"
-    
     # Check if environment already exists
     if conda env list | grep -q "^${ENV_NAME}"; then
         print_warning "Conda environment '${ENV_NAME}' already exists"
@@ -101,7 +97,6 @@ create_conda_env() {
     
     if [ $? -eq 0 ]; then
         print_success "Conda environment '${ENV_NAME}' created successfully"
-        print_message $BLUE "💡 Activate environment command: conda activate ${ENV_NAME}"
         return 0
     else
         print_error "Environment creation failed"
@@ -111,22 +106,9 @@ create_conda_env() {
 
 # Create project directories
 create_directories() {
-    print_step "Creating project directories"
-    
     directories=(
-        "data"
-        "data/documents"
-        "data/graphs"
-        "data/datasets"
-        "data/vectors"
+        "output"
         "logs"
-        "models"
-        "models/huggingface"
-        "outputs"
-        "outputs/results"
-        "outputs/reports"
-        "cache"
-        "cache/embeddings"
     )
     
     for dir in "${directories[@]}"; do
@@ -137,8 +119,6 @@ create_directories() {
 
 # Install conda packages
 install_conda_packages() {
-    print_step "Installing base packages with conda"
-    
     packages=(
         "pyyaml"
         "pandas"
@@ -160,8 +140,6 @@ install_conda_packages() {
 
 # Install pip packages
 install_pip_packages() {
-    print_step "Installing other dependencies with pip"
-    
     # Check if requirements files exist, skip if not found
     if [ ! -f "requirements_minimal.txt" ] && [ ! -f "requirements.txt" ]; then
         print_warning "No requirements files found, skipping pip package installation"
@@ -194,8 +172,6 @@ install_pip_packages() {
 
 # Install complete AI/ML dependencies
 install_complete_dependencies() {
-    print_step "Installing complete AI/ML dependencies"
-    
     local ml_packages=(
         "torch"
         "transformers>=4.30.0" 
@@ -228,8 +204,6 @@ install_complete_dependencies() {
 
 # Install browser automation tools
 install_browser_automation() {
-    print_step "Installing browser automation tools"
-    
     print_info "Installing Playwright browsers..."
     # Install all browsers (chromium, firefox, webkit) with system dependencies
     if conda run -n "$ENV_NAME" playwright install --with-deps; then
@@ -261,8 +235,6 @@ install_browser_automation() {
 
 # Download and configure NLP models
 setup_nlp_models() {
-    print_step "Setting up NLP models"
-    
     print_info "Downloading spaCy English model..."
     if conda run -n "$ENV_NAME" python -m spacy download en_core_web_sm >/dev/null 2>&1; then
         print_success "spaCy model downloaded successfully"
@@ -275,8 +247,6 @@ setup_nlp_models() {
 
 # Setup environment variables file
 setup_env_file() {
-    print_step "Setting up environment variables"
-    
     cat > .env.example << 'EOF'
 # API Configuration - Please enter your real API keys
 OPENAI_API_KEY=your_openai_api_key_here
@@ -404,14 +374,13 @@ print_next_steps() {
 
 # Main function
 main() {
-    print_header "🚀 GraphRAG + TaskCraft Benchmark Environment Setup"
+    print_header "🚀 Graph2Eval Environment Setup"
     
     # Check runtime environment
     if [[ "$OSTYPE" == "msys" || "$OSTYPE" == "cygwin" ]]; then
         print_warning "Windows environment detected, recommend running this script in WSL"
     fi
     
-    print_message $CYAN "📦 Performing complete installation (including AI/ML features)"
     INSTALL_COMPLETE=true
 
     # Execution steps
@@ -451,16 +420,6 @@ main() {
     fi
     
     print_next_steps
-    
-    # Environment setup completed
-    echo ""
-    print_header "🏁 Environment Setup Completed"
-    print_success "Environment setup completed successfully!"
-    print_message $GREEN "💡 Your GraphRAG Benchmark environment is ready!"
-    
-    print_info "To activate the environment, run:"
-    echo "  conda activate ${ENV_NAME}"
-    echo "  or use: source activate.sh"
     
     # Return status
     [ ${#failed_steps[@]} -eq 0 ]

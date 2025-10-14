@@ -7,13 +7,14 @@ import os
 import sys
 import time
 import json
+import pickle
 import argparse
 from pathlib import Path
 from typing import List, Dict, Any, Optional, Tuple
 from datetime import datetime
 import numpy as np
 from tqdm import tqdm
-
+import yaml
 from loguru import logger
 
 # Import our configuration system
@@ -75,7 +76,6 @@ class BenchmarkRunner:
         main_config_path = Path(self.config_dir) / "main_config.yaml"
         if main_config_path.exists():
             with open(main_config_path, 'r', encoding='utf-8') as f:
-                import yaml
                 main_config_data = yaml.safe_load(f)
                 orchestration_config = main_config_data.get('orchestration', {})
         else:
@@ -404,9 +404,10 @@ class BenchmarkRunner:
                 logger.info("📋 Collect mode: Initializing minimal components")
                 # No additional components needed for collect mode
         elif mode == "graph":
-            # Graph mode needs GraphRAG components
-            logger.info("🕸️ Graph mode: Initializing GraphRAG components")
+            # Graph mode needs GraphRAG components and ingestion components
+            logger.info("🕸️ Graph mode: Initializing GraphRAG and ingestion components")
             self._initialize_graph_rag_components()
+            self._initialize_ingestion_components()
         elif mode == "generate":
             # Generate mode only needs minimal components for task generation
             logger.info("🎯 Generate mode: Initializing minimal components for task generation")
@@ -1092,6 +1093,14 @@ class BenchmarkRunner:
                     json.dump(results, f, indent=2, ensure_ascii=False, cls=NumpyEncoder)
 
                 logger.info(f"💾 Document collection results saved to: {results_file}")
+                
+                # Save raw_documents using pickle for later use in graph mode
+                raw_documents = ingestion_results.get("raw_documents", [])
+                if raw_documents:
+                    raw_docs_file = results_subdir / "raw_documents.pkl"
+                    with open(raw_docs_file, 'wb') as f:
+                        pickle.dump(raw_documents, f)
+                    logger.info(f"💾 Raw documents saved to: {raw_docs_file}")
 
             except Exception as e:
                 logger.error(f"❌ Failed to save document collection results: {e}")
@@ -1250,9 +1259,27 @@ class BenchmarkRunner:
                 with open(collection_results_file, 'r', encoding='utf-8') as f:
                     collection_results = json.load(f)
 
-                # Re-run ingestion to get raw documents
-                input_documents = collection_results.get("documents", [])
-                ingestion_results = self._run_ingestion_stage(input_documents)
+                # Try to load raw documents from pickle file first
+                raw_docs_file = collection_path_obj / "results" / "raw_documents.pkl"
+                if raw_docs_file.exists():
+                    logger.info(f"📦 Loading raw documents from: {raw_docs_file}")
+                    with open(raw_docs_file, 'rb') as f:
+                        raw_documents = pickle.load(f)
+                    
+                    # Create ingestion_results structure
+                    ingestion_results = {
+                        "documents_processed": len(raw_documents),
+                        "total_elements": sum(len(doc.elements) for doc in raw_documents),
+                        "processing_time": 0,  # Already processed
+                        "documents": collection_results.get("stages", {}).get("ingestion", {}).get("documents", []),
+                        "raw_documents": raw_documents
+                    }
+                    logger.info(f"✅ Loaded {len(raw_documents)} documents from cache ({ingestion_results['total_elements']} elements)")
+                else:
+                    # Fallback: Re-run ingestion if pickle file doesn't exist
+                    logger.warning(f"⚠️ Raw documents cache not found, re-running ingestion")
+                    input_documents = collection_results.get("documents", [])
+                    ingestion_results = self._run_ingestion_stage(input_documents)
 
                 # Stage 1: Graph Construction
                 logger.info("🕸️ Stage: Graph Construction")
@@ -3982,7 +4009,6 @@ class BenchmarkRunner:
             main_config_path = Path(self.config_dir) / "main_config.yaml"
             if main_config_path.exists():
                 with open(main_config_path, 'r', encoding='utf-8') as f:
-                    import yaml
                     main_config_data = yaml.safe_load(f)
                     dataset_creation_config = main_config_data.get('benchmark', {}).get('dataset_creation', {})
             else:
@@ -4074,7 +4100,6 @@ class BenchmarkRunner:
         main_config_path = Path(self.config_dir) / "main_config.yaml"
         if main_config_path.exists():
             with open(main_config_path, 'r', encoding='utf-8') as f:
-                import yaml
                 main_config_data = yaml.safe_load(f)
                 benchmark_config = main_config_data.get('benchmark', {})
                 task_execution_config = benchmark_config.get('task_execution', {})
@@ -5291,7 +5316,6 @@ class BenchmarkRunner:
         main_config_path = Path(self.config_dir) / "main_config.yaml"
         if main_config_path.exists():
             with open(main_config_path, 'r', encoding='utf-8') as f:
-                import yaml
                 main_config_data = yaml.safe_load(f)
                 orchestration_config = main_config_data.get('orchestration', {})
         else:

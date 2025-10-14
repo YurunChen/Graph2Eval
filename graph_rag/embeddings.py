@@ -13,6 +13,7 @@ import faiss
 from sentence_transformers import SentenceTransformer
 import torch
 from loguru import logger
+from tqdm import tqdm
 
 from .node_types import Node, NodeType
 from config_manager import get_config
@@ -296,7 +297,9 @@ class FAISSIndex(VectorIndex):
             self.id_map[internal_idx] = node_id
             self.reverse_id_map[node_id] = internal_idx
         
-        logger.info(f"Added {len(vectors)} vectors to index. Total: {self.index.ntotal}")
+        # Log every 500 vectors to reduce spam
+        if self.index.ntotal % 500 == 0:
+            logger.debug(f"Vector index progress: {self.index.ntotal} vectors indexed")
     
     def search(self, query_vector: np.ndarray, k: int = 10) -> Tuple[List[str], List[float]]:
         """Search for similar vectors"""

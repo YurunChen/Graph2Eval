@@ -15,6 +15,7 @@ from sklearn.metrics.pairwise import cosine_similarity
 import numpy as np
 from loguru import logger
 import json
+from tqdm import tqdm
 
 from ingestion.parsers import DocumentStructure, ParsedElement
 from ingestion.chunkers import Chunk, DocumentChunker, SemanticChunker
@@ -1873,17 +1874,25 @@ class GraphBuilder:
         """Create nodes from document elements"""
         logger.info(f"Creating nodes from {len(elements)} elements")
         
-        for i, element in enumerate(elements):
-            logger.debug(f"Processing element {i}: type={type(element).__name__}, element_type={getattr(element, 'element_type', 'N/A')}")
-            
-            # Check if element has the expected attributes
-            if not hasattr(element, 'element_type'):
-                logger.warning(f"Element {i} does not have element_type attribute: {dir(element)}")
-                continue
+        # Use progress bar for element processing
+        nodes_created = 0
+        with tqdm(total=len(elements), desc="📝 Creating element nodes", unit="elem", ncols=100) as pbar:
+            for i, element in enumerate(elements):
+                # Check if element has the expected attributes
+                if not hasattr(element, 'element_type'):
+                    logger.warning(f"Element {i} does not have element_type attribute")
+                    pbar.update(1)
+                    continue
+                    
+                node = self._element_to_node(element)
+                if node:
+                    graph.add_node(node)
+                    nodes_created += 1
                 
-            node = self._element_to_node(element)
-            if node:
-                graph.add_node(node)
+                pbar.update(1)
+                pbar.set_postfix({"Nodes": nodes_created})
+        
+        logger.info(f"Created {nodes_created} element nodes")
     
     def _element_to_node(self, element: ParsedElement) -> Optional[Node]:
         """Convert ParsedElement to appropriate Node type"""
@@ -1969,46 +1978,51 @@ class GraphBuilder:
         
         entity_mentions = {}  # canonical_name -> EntityNode
         
-        for i, element in enumerate(elements):
-            logger.debug(f"Processing element {i}: type={type(element).__name__}, element_type={getattr(element, 'element_type', 'N/A')}")
-            
-            # Check if element has the expected attributes
-            if not hasattr(element, 'element_type'):
-                logger.warning(f"Element {i} does not have element_type attribute: {dir(element)}")
-                continue
-                
-            if not hasattr(element, 'content'):
-                logger.warning(f"Element {i} does not have content attribute: {dir(element)}")
-                continue
-                
-            if element.element_type in ["paragraph", "heading"]:
-                entities = self._extract_entities(element.content)
-                
-                for ent_text, ent_type, confidence in entities:
-                    canonical_name = ent_text.strip()
+        # Use progress bar for element processing
+        with tqdm(total=len(elements), desc="🔍 Extracting entities", unit="elem", ncols=100) as pbar:
+            for i, element in enumerate(elements):
+                # Check if element has the expected attributes
+                if not hasattr(element, 'element_type'):
+                    logger.warning(f"Element {i} does not have element_type attribute")
+                    pbar.update(1)
+                    continue
                     
-                    if confidence < self.config.entity_confidence_threshold:
-                        continue
+                if not hasattr(element, 'content'):
+                    logger.warning(f"Element {i} does not have content attribute")
+                    pbar.update(1)
+                    continue
                     
-                    # Get or create entity node
-                    if canonical_name not in entity_mentions:
-                        entity_node = EntityNode(
-                            node_id=f"entity_{uuid.uuid4().hex[:8]}",
-                            node_type=NodeType.ENTITY,
-                            content=ent_text,
-                            canonical_name=canonical_name,
-                            entity_type=ent_type,
-                            confidence=confidence
+                if element.element_type in ["paragraph", "heading"]:
+                    entities = self._extract_entities(element.content)
+                    
+                    for ent_text, ent_type, confidence in entities:
+                        canonical_name = ent_text.strip()
+                        
+                        if confidence < self.config.entity_confidence_threshold:
+                            continue
+                        
+                        # Get or create entity node
+                        if canonical_name not in entity_mentions:
+                            entity_node = EntityNode(
+                                node_id=f"entity_{uuid.uuid4().hex[:8]}",
+                                node_type=NodeType.ENTITY,
+                                content=ent_text,
+                                canonical_name=canonical_name,
+                                entity_type=ent_type,
+                                confidence=confidence
+                            )
+                            entity_mentions[canonical_name] = entity_node
+                            graph.add_node(entity_node)
+                        
+                        # Add mention to entity
+                        entity_node = entity_mentions[canonical_name]
+                        entity_node.add_mention(
+                            context=element.content[:200] + "..." if len(element.content) > 200 else element.content,
+                            source_node_id=element.element_id
                         )
-                        entity_mentions[canonical_name] = entity_node
-                        graph.add_node(entity_node)
-                    
-                    # Add mention to entity
-                    entity_node = entity_mentions[canonical_name]
-                    entity_node.add_mention(
-                        context=element.content[:200] + "..." if len(element.content) > 200 else element.content,
-                        source_node_id=element.element_id
-                    )
+                
+                pbar.update(1)
+                pbar.set_postfix({"Entities": len(entity_mentions)})
         
         logger.info(f"Created {len(entity_mentions)} entity nodes")
     
