@@ -466,8 +466,11 @@ python benchmark_runner.py -m evaluate -f output/generate/run_*/
 
 #### Batch Processing Multiple Documents
 ```bash
-# Process multiple documents
-python benchmark_runner.py -m collect -d documents/*.pdf documents/*.txt
+# Process multiple documents (all PDF files)
+python benchmark_runner.py -m collect -d documents/*.pdf
+
+# Process specific multiple documents
+python benchmark_runner.py -m collect -d documents/doc1.pdf documents/doc2.pdf documents/doc3.pdf
 
 # Batch evaluate multiple datasets
 python benchmark_runner.py -m evaluate \
