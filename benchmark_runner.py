@@ -3334,7 +3334,7 @@ class BenchmarkRunner:
         if safety_web_tasks_path.exists():
             dataset_paths["safety_web_tasks"] = str(safety_web_tasks_path)
         
-        # Look for graph files - prioritize generate folder, then use provided graph_path or auto-detect latest graph directory
+        # Look for graph files - use provided graph_path or check current generate folder
         if graph_path:
             graph_base = Path(graph_path)
             graph_file = graph_base / "graph" / "knowledge_graph.json"
@@ -3351,12 +3351,8 @@ class BenchmarkRunner:
                 vectors_dir = generate_vectors_dir
                 logger.info(f"🕸️ Using graph files from generate folder: {graph_base}")
             else:
-                # Fallback to auto-detect latest graph directory
-                graph_base = self._auto_detect_latest_graph()
-                if not graph_base:
-                    raise FileNotFoundError("No graph directory found. Please specify with -g or run graph mode first")
-                graph_file = Path(graph_base) / "graph" / "knowledge_graph.json"
-                vectors_dir = Path(graph_base) / "vectors"
+                # No graph files found in generate folder
+                raise FileNotFoundError(f"No graph files found in generate folder: {base_path}. Please specify graph path with -g or ensure graph files exist in the generate folder.")
         
         if not graph_file.exists():
             raise FileNotFoundError(f"Knowledge graph not found at {graph_file}")
@@ -6811,7 +6807,7 @@ def main():
     parser.add_argument("--output-dir", "-o", help="Output directory for results")
     
     # Evaluation mode arguments
-    parser.add_argument("--file","-f", help="Path to file (.jsonl or .json) (for evaluate mode)")
+    parser.add_argument("--file","-f", help="Path to file (.jsonl or .json) or directory (for evaluate mode)")
     parser.add_argument("--datasets-folder", "-df", help="Path to datasets folder for batch evaluation (for evaluate mode)")
     parser.add_argument("--dataset-type", "-t", choices=["normal", "safety", "all"], default="all",
                        help="Dataset type to evaluate: 'normal' for normal tasks, 'safety' for safety tasks, 'all' for both (default: all)")
@@ -7030,18 +7026,27 @@ def main():
 
             elif args.file:
                 # ===============================
-                # SINGLE FILE EVALUATION MODE (single file evaluation)
+                # FILE/DIRECTORY EVALUATION MODE (auto-detect file or directory)
                 # ===============================
-                logger.info("📄 SINGLE FILE EVALUATION MODE")
-                logger.info(f"📄 Processing file: {args.file}")
+                logger.info("📄 FILE/DIRECTORY EVALUATION MODE")
+                logger.info(f"📄 Processing path: {args.file}")
 
                 # Validate input
                 if not args.file:
-                    raise ValueError("File path is required for single file evaluation")
+                    raise ValueError("File or directory path is required for evaluation")
                 if not Path(args.file).exists():
-                    raise FileNotFoundError(f"Dataset file not found: {args.file}")
+                    raise FileNotFoundError(f"Path not found: {args.file}")
 
-                results = runner._evaluate_single_file(args.file, args.graph, args.dataset_type, args.output_dir, agent_mode)
+                # Auto-detect if it's a file or directory
+                path_obj = Path(args.file)
+                if path_obj.is_dir():
+                    # It's a directory, use directory evaluation
+                    logger.info("📂 Detected directory, using directory evaluation mode")
+                    results = runner._evaluate_directory(args.file, args.graph, args.dataset_type, args.output_dir, agent_mode)
+                else:
+                    # It's a file, use single file evaluation
+                    logger.info("📄 Detected file, using single file evaluation mode")
+                    results = runner._evaluate_single_file(args.file, args.graph, args.dataset_type, args.output_dir, agent_mode)
 
             else:
                 # ===============================

@@ -1,6 +1,6 @@
 # Agent configuration options
-agent_mode: single     # Available modes: [single, multi, web]
-agent_type: no_rag  # Type options: [no_rag, rag, agent_s, som_agent] 
+agent_mode: web     # Available modes: [single, multi, web]
+agent_type: som_agent  # Type options: [no_rag, rag, agent_s, som_agent] 
                         # Note: agent_s and som_agent are web agent types (use with agent_mode: web)
                         # no_rag and rag are for single/multi agent modes
 
