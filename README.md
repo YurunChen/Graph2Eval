@@ -76,14 +76,11 @@ Specialized agents for web-based tasks:
 We would be grateful if you could cite our paper if you find this work helpful for your research:
 
 ```bibtex
-@misc{chen2025graph2evalautomaticmultimodaltask,
-      title={Graph2Eval: Automatic Multimodal Task Generation for Agents via Knowledge Graphs}, 
-      author={Yurun Chen and Xavier Hu and Yuhan Liu and Ziqi Wang and Zeyi Liao and Lin Chen and Feng Wei and Yuxi Qian and Bo Zheng and Keting Yin and Shengyu Zhang},
-      year={2025},
-      eprint={2510.00507},
-      archivePrefix={arXiv},
-      primaryClass={cs.CL},
-      url={https://arxiv.org/abs/2510.00507}, 
+@article{chen2025graph2eval,
+  title={Graph2Eval: Automatic Multimodal Task Generation for Agents via Knowledge Graphs},
+  author={Chen, Yurun and Hu, Xavier and Liu, Yuhan and Wang, Ziqi and Liao, Zeyi and Chen, Lin and Wei, Feng and Qian, Yuxi and Zheng, Bo and Yin, Keting and others},
+  journal={arXiv preprint arXiv:2510.00507},
+  year={2025}
 }
 ```
 
